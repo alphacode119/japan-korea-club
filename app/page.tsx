@@ -280,19 +280,17 @@ export default function ClubMainDashboard() {
     loadAllData(currentUser.id, userProfile?.role === 'ADMIN')
   }
 
-  // ★ 모임 자체 취소/삭제 기능 (관리자 전용) ★
+  // 모임 자체 취소/삭제 기능 (관리자 전용)
   const handleDeleteEvent = async (event: EventItem) => {
     const confirmMessage = `[경고] "${event.title}" 모임을 완전히 취소(삭제)하시겠습니까?\n\n※ 등록된 모임 정보와 참가 신청자 내역이 모두 함께 삭제됩니다.`
     if (!confirm(confirmMessage)) return
 
     try {
-      // 1. 해당 모임에 신청된 내역 먼저 삭제
       await supabase
         .from('event_applications')
         .delete()
         .eq('event_id', event.id)
 
-      // 2. 모임 자체 삭제
       const { error } = await supabase
         .from('events')
         .delete()
@@ -340,6 +338,17 @@ export default function ClubMainDashboard() {
     }
   }
 
+  // 새 모임 생성 입력 폼 취소/초기화 기능
+  const handleCancelCreateEvent = () => {
+    const hasInput = newEvent.title || newEvent.event_date || newEvent.location || newEvent.description
+    if (hasInput) {
+      if (!confirm('작성 중인 모임 정보가 모두 초기화됩니다. 모임 생성을 취소하시겠습니까?')) {
+        return
+      }
+    }
+    setNewEvent({ title: '', event_date: '', location: '', max_count: 20, description: '' })
+  }
+
   const handleLogout = async () => {
     await supabase.auth.signOut()
     router.push('/login')
@@ -357,35 +366,46 @@ export default function ClubMainDashboard() {
 
   return (
     <div className="min-h-screen bg-slate-100 text-slate-800 pb-20">
-      {/* 상단 헤더 */}
-      <header className="bg-white border-b border-slate-200 sticky top-0 z-30">
-        <div className="max-w-6xl mx-auto px-4 py-3 flex justify-between items-center">
-          <div className="flex items-center gap-2">
-            <span className="text-2xl">🤝</span>
-            <div>
-              <h1 className="font-bold text-lg text-slate-900 leading-tight">한일 교류회 (日韓交流会)</h1>
-              <p className="text-xs text-slate-400">한국인 & 일본인 친목 언어교환 플랫폼</p>
+      {/* 상단 헤더 (모바일 반응형 flex 정렬 개선) */}
+      <header className="bg-white border-b border-slate-200 sticky top-0 z-30 shadow-sm">
+        <div className="max-w-6xl mx-auto px-3 sm:px-4 py-2.5 sm:py-3 flex justify-between items-center gap-2">
+          {/* 로고 & 타이틀 */}
+          <div className="flex items-center gap-2 min-w-0">
+            <span className="text-xl sm:text-2xl shrink-0">🤝</span>
+            <div className="truncate">
+              <h1 className="font-bold text-sm sm:text-lg text-slate-900 leading-tight truncate">
+                한일 교류회 (日韓交流会)
+              </h1>
+              <p className="text-[10px] sm:text-xs text-slate-400 truncate">한국인 & 일본인 친목 언어교환</p>
             </div>
           </div>
-          <div className="flex items-center gap-3">
-            <div className="text-right">
-              <span className="text-sm font-semibold text-slate-800">{userProfile?.name || '회원'}</span>
-              {isAdmin ? (
-                <span className="ml-2 text-[11px] font-bold px-2 py-0.5 bg-purple-100 text-purple-700 rounded-full border border-purple-200">
-                  👑 총괄 관리자
+
+          {/* 유저 정보 & 로그아웃 */}
+          <div className="flex items-center gap-2 sm:gap-3 shrink-0">
+            <div className="text-right flex flex-col items-end">
+              <div className="flex items-center gap-1">
+                <span className="text-xs sm:text-sm font-semibold text-slate-800 whitespace-nowrap">
+                  {userProfile?.name || '회원'}
                 </span>
-              ) : (
-                <span className="ml-2 text-[11px] font-medium px-2 py-0.5 bg-slate-100 text-slate-600 rounded-full">
-                  일반회원
-                </span>
-              )}
+                {isAdmin ? (
+                  <span className="text-[10px] sm:text-[11px] font-bold px-1.5 py-0.2 sm:px-2 sm:py-0.5 bg-purple-100 text-purple-700 rounded-full border border-purple-200 whitespace-nowrap">
+                    👑 총괄 관리자
+                  </span>
+                ) : (
+                  <span className="text-[10px] sm:text-[11px] font-medium px-1.5 py-0.2 sm:px-2 sm:py-0.5 bg-slate-100 text-slate-600 rounded-full whitespace-nowrap">
+                    일반회원
+                  </span>
+                )}
+              </div>
               {userProfile?.instagram_id && (
-                <p className="text-xs text-pink-600 font-medium">@{userProfile.instagram_id.replace(/^@/, '')}</p>
+                <p className="text-[10px] sm:text-xs text-pink-600 font-medium whitespace-nowrap">
+                  @{userProfile.instagram_id.replace(/^@/, '')}
+                </p>
               )}
             </div>
             <button
               onClick={handleLogout}
-              className="px-3 py-1.5 text-xs bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-lg transition"
+              className="px-2.5 py-1 sm:px-3 sm:py-1.5 text-[11px] sm:text-xs bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-lg transition whitespace-nowrap shrink-0"
             >
               로그아웃
             </button>
@@ -393,22 +413,22 @@ export default function ClubMainDashboard() {
         </div>
       </header>
 
-      <main className="max-w-6xl mx-auto px-4 pt-6 space-y-8">
+      <main className="max-w-6xl mx-auto px-3 sm:px-4 pt-5 sm:pt-6 space-y-6 sm:space-y-8">
         {/* 모임 목록 섹션 */}
         <section>
-          <div className="flex justify-between items-center mb-4">
-            <h2 className="text-lg font-bold text-slate-900 flex items-center gap-2">
+          <div className="flex justify-between items-center mb-3 sm:mb-4">
+            <h2 className="text-base sm:text-lg font-bold text-slate-900 flex items-center gap-2">
               <span>📅</span> 예정된 교류회 일정
             </h2>
-            <span className="text-xs text-slate-500">자유롭게 신청 및 취소가 가능합니다</span>
+            <span className="text-[11px] sm:text-xs text-slate-500">신청 및 취소 가능</span>
           </div>
 
           {events.length === 0 ? (
-            <div className="bg-white p-10 rounded-2xl border text-center text-slate-400 text-sm">
+            <div className="bg-white p-8 sm:p-10 rounded-2xl border text-center text-slate-400 text-sm">
               현재 예정된 모임 일정이 없습니다. 아래에서 새 모임을 등록해 보세요.
             </div>
           ) : (
-            <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-5">
+            <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-5">
               {events.map((ev) => {
                 const isApplied = !!myApplications[ev.id]
                 const isFull = ev.max_count > 0 && ev.current_count >= ev.max_count
@@ -416,15 +436,14 @@ export default function ClubMainDashboard() {
                 return (
                   <div
                     key={ev.id}
-                    className="relative bg-white rounded-2xl border border-slate-200 p-5 shadow-sm hover:shadow-md transition flex flex-col justify-between"
+                    className="relative bg-white rounded-2xl border border-slate-200 p-4 sm:p-5 shadow-sm hover:shadow-md transition flex flex-col justify-between"
                   >
                     <div>
-                      {/* 카드 상단: 날짜 + 정원 + (관리자용 모임 자체 삭제 버튼) */}
                       <div className="flex justify-between items-start mb-2">
                         <span className="text-xs font-semibold px-2.5 py-0.5 bg-indigo-50 text-indigo-600 rounded-md border border-indigo-100">
                           {formatDisplayDate(ev.event_date)}
                         </span>
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-1.5">
                           <span
                             className={`text-xs px-2 py-0.5 rounded-full font-bold ${
                               isFull ? 'bg-rose-100 text-rose-600' : 'bg-emerald-100 text-emerald-700'
@@ -433,7 +452,6 @@ export default function ClubMainDashboard() {
                             {ev.max_count === 0 ? '정원 무제한' : `${ev.current_count} / ${ev.max_count}명`}
                           </span>
 
-                          {/* ★ 관리자 전용: 모임 자체 취소/삭제 버튼 ★ */}
                           {isAdmin && (
                             <button
                               onClick={() => handleDeleteEvent(ev)}
@@ -446,7 +464,7 @@ export default function ClubMainDashboard() {
                         </div>
                       </div>
 
-                      <h3 className="font-bold text-base text-slate-900 mb-1">{ev.title}</h3>
+                      <h3 className="font-bold text-sm sm:text-base text-slate-900 mb-1">{ev.title}</h3>
                       <p className="text-xs text-slate-500 flex items-center gap-1 mb-3">
                         <span>📍</span> {ev.location}
                       </p>
@@ -457,18 +475,18 @@ export default function ClubMainDashboard() {
                       )}
                     </div>
 
-                    <div className="pt-4 mt-3 border-t border-slate-100">
+                    <div className="pt-3 sm:pt-4 mt-3 border-t border-slate-100">
                       {isApplied ? (
                         <div className="flex gap-2">
                           <button
                             disabled
-                            className="flex-1 py-2.5 bg-emerald-50 text-emerald-700 font-bold text-xs rounded-xl border border-emerald-200 cursor-default"
+                            className="flex-1 py-2 sm:py-2.5 bg-emerald-50 text-emerald-700 font-bold text-xs rounded-xl border border-emerald-200 cursor-default"
                           >
                             ✓ 참가 확정
                           </button>
                           <button
                             onClick={() => handleCancelApplication(ev.id)}
-                            className="px-3 py-2.5 bg-rose-50 hover:bg-rose-100 text-rose-600 font-bold text-xs rounded-xl border border-rose-200 transition"
+                            className="px-3 py-2 sm:py-2.5 bg-rose-50 hover:bg-rose-100 text-rose-600 font-bold text-xs rounded-xl border border-rose-200 transition"
                           >
                             신청 취소
                           </button>
@@ -476,14 +494,14 @@ export default function ClubMainDashboard() {
                       ) : isFull ? (
                         <button
                           disabled
-                          className="w-full py-2.5 bg-slate-100 text-slate-400 font-bold text-xs rounded-xl cursor-not-allowed"
+                          className="w-full py-2 sm:py-2.5 bg-slate-100 text-slate-400 font-bold text-xs rounded-xl cursor-not-allowed"
                         >
                           정원 마감
                         </button>
                       ) : (
                         <button
                           onClick={() => openApplyModal(ev)}
-                          className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-xl shadow-sm transition active:scale-[0.99]"
+                          className="w-full py-2 sm:py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-xl shadow-sm transition active:scale-[0.99]"
                         >
                           참가 신청하기
                         </button>
@@ -498,8 +516,8 @@ export default function ClubMainDashboard() {
 
         {/* 참가 신청 모달 */}
         {selectedEvent && (
-          <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-            <div className="bg-white w-full max-w-md rounded-2xl p-6 shadow-xl space-y-4">
+          <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-3 sm:p-4">
+            <div className="bg-white w-full max-w-md rounded-2xl p-5 sm:p-6 shadow-xl space-y-4 max-h-[90vh] overflow-y-auto">
               <div className="flex justify-between items-center border-b pb-3">
                 <h3 className="font-bold text-base text-slate-900">모임 참가 신청</h3>
                 <button onClick={() => setSelectedEvent(null)} className="text-slate-400 hover:text-slate-600 text-lg">
@@ -515,7 +533,6 @@ export default function ClubMainDashboard() {
               </div>
 
               <form onSubmit={handleApply} className="space-y-3 text-xs">
-                {/* 기본 정보 */}
                 <div>
                   <label className="block font-semibold text-slate-700 mb-1">이름</label>
                   <input
@@ -606,9 +623,9 @@ export default function ClubMainDashboard() {
                 {/* 첫 참가 vs N회차 라디오 선택 영역 */}
                 <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 space-y-2 mt-2">
                   <span className="block font-semibold text-slate-700 mb-1">참가 이력 구분</span>
-                  <div className="grid grid-cols-2 gap-3 items-center">
+                  <div className="grid grid-cols-2 gap-2 sm:gap-3 items-center">
                     <label
-                      className={`flex items-center gap-2 p-2 rounded-lg border cursor-pointer transition ${
+                      className={`flex items-center gap-1.5 sm:gap-2 p-2 rounded-lg border cursor-pointer transition ${
                         applyForm.participation_type === 'first'
                           ? 'bg-indigo-50/70 border-indigo-300 text-indigo-900 font-bold'
                           : 'bg-white border-slate-200 text-slate-600'
@@ -622,11 +639,11 @@ export default function ClubMainDashboard() {
                         onChange={() => setApplyForm({ ...applyForm, participation_type: 'first' })}
                         className="text-indigo-600"
                       />
-                      <span>🌱 첫 참가</span>
+                      <span className="whitespace-nowrap">🌱 첫 참가</span>
                     </label>
 
                     <label
-                      className={`flex items-center gap-2 p-2 rounded-lg border cursor-pointer transition ${
+                      className={`flex items-center gap-1.5 sm:gap-2 p-2 rounded-lg border cursor-pointer transition ${
                         applyForm.participation_type === 'repeat'
                           ? 'bg-indigo-50/70 border-indigo-300 text-indigo-900 font-bold'
                           : 'bg-white border-slate-200 text-slate-600'
@@ -640,13 +657,13 @@ export default function ClubMainDashboard() {
                         onChange={() => setApplyForm({ ...applyForm, participation_type: 'repeat' })}
                         className="text-indigo-600"
                       />
-                      <span>🔁 N회차 (재참가)</span>
+                      <span className="whitespace-nowrap">🔁 N회차 (재참가)</span>
                     </label>
                   </div>
 
                   {applyForm.participation_type === 'repeat' && (
                     <div className="pt-2 flex items-center justify-between bg-white p-2.5 rounded-lg border border-indigo-100">
-                      <span className="text-slate-700 font-medium">이번 참가 회차:</span>
+                      <span className="text-slate-700 font-medium whitespace-nowrap">이번 참가 회차:</span>
                       <div className="flex items-center gap-1.5">
                         <select
                           value={applyForm.participation_count}
@@ -669,7 +686,7 @@ export default function ClubMainDashboard() {
                           onChange={(e) =>
                             setApplyForm({ ...applyForm, participation_count: Math.max(2, Number(e.target.value)) })
                           }
-                          className="w-14 p-1 border rounded text-center font-bold"
+                          className="w-12 sm:w-14 p-1 border rounded text-center font-bold"
                         />
                         <span className="text-slate-400 text-[11px]">회)</span>
                       </div>
@@ -699,14 +716,24 @@ export default function ClubMainDashboard() {
 
         {/* 관리자(ADMIN) 전용 섹션 */}
         {isAdmin && (
-          <div className="space-y-8 pt-6 border-t border-slate-200">
+          <div className="space-y-6 sm:space-y-8 pt-5 sm:pt-6 border-t border-slate-200">
             {/* 1. 관리자: 새 모임 생성 */}
-            <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
-              <h3 className="font-bold text-base text-slate-900 mb-4 flex items-center gap-2">
-                <span>➕</span> 새 모임 스케줄 생성 (관리자)
-              </h3>
+            <div className="bg-white p-4 sm:p-6 rounded-2xl border border-slate-200 shadow-sm">
+              <div className="flex justify-between items-center mb-4">
+                <h3 className="font-bold text-sm sm:text-base text-slate-900 flex items-center gap-2">
+                  <span>➕</span> 새 모임 스케줄 생성 (관리자)
+                </h3>
+                <button
+                  type="button"
+                  onClick={handleCancelCreateEvent}
+                  className="text-xs text-slate-400 hover:text-slate-600 underline font-medium"
+                >
+                  입력 내용 초기화
+                </button>
+              </div>
+
               <form onSubmit={handleCreateEvent} className="space-y-4 text-xs">
-                <div className="grid md:grid-cols-2 gap-4">
+                <div className="grid md:grid-cols-2 gap-3 sm:gap-4">
                   <div>
                     <label className="block font-semibold text-slate-700 mb-1">모임명</label>
                     <input
@@ -730,7 +757,7 @@ export default function ClubMainDashboard() {
                   </div>
                 </div>
 
-                <div className="grid md:grid-cols-2 gap-4">
+                <div className="grid md:grid-cols-2 gap-3 sm:gap-4">
                   <div>
                     <label className="block font-semibold text-slate-700 mb-1">장소</label>
                     <input
@@ -766,22 +793,31 @@ export default function ClubMainDashboard() {
                   />
                 </div>
 
-                <button
-                  type="submit"
-                  className="px-6 py-2.5 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-xl transition shadow-sm"
-                >
-                  모임 일정 게시하기
-                </button>
+                <div className="flex items-center gap-3 pt-1">
+                  <button
+                    type="submit"
+                    className="px-5 sm:px-6 py-2.5 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-xl transition shadow-sm"
+                  >
+                    모임 일정 게시하기
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleCancelCreateEvent}
+                    className="px-3.5 sm:px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold rounded-xl transition"
+                  >
+                    작성 취소
+                  </button>
+                </div>
               </form>
             </div>
 
-            {/* 2. 관리자 탭 명부: [모임별 신청 명부] / [전체 회원 목록] */}
-            <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
+            {/* 2. 관리자 탭 명부 (가로 스크롤 및 글자 세로 꺾임 방지 적용) */}
+            <div className="bg-white p-4 sm:p-6 rounded-2xl border border-slate-200 shadow-sm">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
                 <div className="flex items-center gap-2">
                   <button
                     onClick={() => setActiveTab('applications')}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition ${
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition whitespace-nowrap ${
                       activeTab === 'applications'
                         ? 'bg-slate-900 text-white shadow-sm'
                         : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
@@ -791,7 +827,7 @@ export default function ClubMainDashboard() {
                   </button>
                   <button
                     onClick={() => setActiveTab('members')}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition ${
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition whitespace-nowrap ${
                       activeTab === 'members'
                         ? 'bg-slate-900 text-white shadow-sm'
                         : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
@@ -800,23 +836,25 @@ export default function ClubMainDashboard() {
                     👥 전체 회원 명부 ({allMembers.length}명)
                   </button>
                 </div>
-                <span className="text-xs text-slate-400">아이디 클릭 시 상대방 인스타로 바로 연결됩니다</span>
+                <span className="text-[11px] sm:text-xs text-slate-400 flex items-center gap-1">
+                  👉 <span>좌우로 밀어서 전체 명부를 볼 수 있습니다</span>
+                </span>
               </div>
 
               {/* 탭 1: 모임별 참가 신청 명부 */}
               {activeTab === 'applications' && (
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left text-xs border-collapse">
+                <div className="overflow-x-auto -mx-4 sm:mx-0 px-4 sm:px-0">
+                  <table className="w-full min-w-[720px] text-left text-xs border-collapse">
                     <thead>
                       <tr className="bg-slate-50 text-slate-600 border-b">
-                        <th className="p-3">모임명</th>
-                        <th className="p-3">이름</th>
-                        <th className="p-3">나이</th>
-                        <th className="p-3">성별</th>
-                        <th className="p-3">국적</th>
-                        <th className="p-3">인스타그램</th>
-                        <th className="p-3">어학 실력 (한국어 / 일본어)</th>
-                        <th className="p-3">참가 이력</th>
+                        <th className="p-3 whitespace-nowrap">모임명</th>
+                        <th className="p-3 whitespace-nowrap">이름</th>
+                        <th className="p-3 whitespace-nowrap">나이</th>
+                        <th className="p-3 whitespace-nowrap">성별</th>
+                        <th className="p-3 whitespace-nowrap">국적</th>
+                        <th className="p-3 whitespace-nowrap">인스타그램</th>
+                        <th className="p-3 whitespace-nowrap">어학 실력 (한국어 / 일본어)</th>
+                        <th className="p-3 whitespace-nowrap">참가 이력</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
@@ -833,26 +871,28 @@ export default function ClubMainDashboard() {
 
                           return (
                             <tr key={app.id} className="hover:bg-slate-50/80 transition">
-                              <td className="p-3 font-semibold text-slate-800">{matchedEvent?.title || '모임'}</td>
-                              <td className="p-3 font-medium text-slate-900">{app.name}</td>
-                              <td className="p-3 text-slate-600">{app.age}세</td>
-                              <td className="p-3">
+                              <td className="p-3 font-semibold text-slate-800 whitespace-nowrap">
+                                {matchedEvent?.title || '모임'}
+                              </td>
+                              <td className="p-3 font-medium text-slate-900 whitespace-nowrap">{app.name}</td>
+                              <td className="p-3 text-slate-600 whitespace-nowrap">{app.age}세</td>
+                              <td className="p-3 whitespace-nowrap">
                                 <span
-                                  className={`px-2 py-0.5 rounded font-semibold text-[11px] ${
+                                  className={`px-2 py-0.5 rounded font-semibold text-[11px] whitespace-nowrap ${
                                     isMale(app.gender) ? 'bg-blue-50 text-blue-600' : 'bg-rose-50 text-rose-600'
                                   }`}
                                 >
                                   {isMale(app.gender) ? '남 男' : '여 女'}
                                 </span>
                               </td>
-                              <td className="p-3 text-slate-700">{app.nationality}</td>
-                              <td className="p-3">
+                              <td className="p-3 text-slate-700 whitespace-nowrap">{app.nationality}</td>
+                              <td className="p-3 whitespace-nowrap">
                                 {cleanInsta ? (
                                   <a
                                     href={`https://instagram.com/${cleanInsta}`}
                                     target="_blank"
                                     rel="noopener noreferrer"
-                                    className="text-pink-600 hover:text-pink-700 font-medium hover:underline inline-flex items-center gap-1"
+                                    className="text-pink-600 hover:text-pink-700 font-medium hover:underline inline-flex items-center gap-1 whitespace-nowrap"
                                   >
                                     <span>@{cleanInsta}</span>
                                     <svg className="w-3 h-3 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -863,17 +903,17 @@ export default function ClubMainDashboard() {
                                   <span className="text-slate-400">-</span>
                                 )}
                               </td>
-                              <td className="p-3 text-slate-600">
+                              <td className="p-3 text-slate-600 whitespace-nowrap">
                                 <span className="font-medium text-slate-700">KR:</span> {normalizeLevel(app.korean_level, '-')} /{' '}
                                 <span className="font-medium text-slate-700">JP:</span> {normalizeLevel(app.japanese_level, '-')}
                               </td>
-                              <td className="p-3">
+                              <td className="p-3 whitespace-nowrap">
                                 {app.is_first ? (
-                                  <span className="px-2 py-0.5 bg-amber-50 text-amber-600 rounded text-[11px] font-semibold">
+                                  <span className="px-2 py-0.5 bg-amber-50 text-amber-600 rounded text-[11px] font-semibold whitespace-nowrap">
                                     첫참가
                                   </span>
                                 ) : (
-                                  <span className="px-2 py-0.5 bg-slate-100 text-slate-700 rounded text-[11px] font-medium">
+                                  <span className="px-2 py-0.5 bg-slate-100 text-slate-700 rounded text-[11px] font-medium whitespace-nowrap">
                                     {app.participation_count ? `${app.participation_count}회차` : '재참가'}
                                   </span>
                                 )}
@@ -889,16 +929,16 @@ export default function ClubMainDashboard() {
 
               {/* 탭 2: 전체 회원 명부 */}
               {activeTab === 'members' && (
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left text-xs border-collapse">
+                <div className="overflow-x-auto -mx-4 sm:mx-0 px-4 sm:px-0">
+                  <table className="w-full min-w-[640px] text-left text-xs border-collapse">
                     <thead>
                       <tr className="bg-slate-50 text-slate-600 border-b">
-                        <th className="p-3">이름 / 닉네임</th>
-                        <th className="p-3">성별</th>
-                        <th className="p-3">국적</th>
-                        <th className="p-3">인스타그램</th>
-                        <th className="p-3">어학 실력 (한국어 / 일본어)</th>
-                        <th className="p-3">회원 등급</th>
+                        <th className="p-3 whitespace-nowrap">이름 / 닉네임</th>
+                        <th className="p-3 whitespace-nowrap">성별</th>
+                        <th className="p-3 whitespace-nowrap">국적</th>
+                        <th className="p-3 whitespace-nowrap">인스타그램</th>
+                        <th className="p-3 whitespace-nowrap">어학 실력 (한국어 / 일본어)</th>
+                        <th className="p-3 whitespace-nowrap">회원 등급</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
@@ -914,11 +954,13 @@ export default function ClubMainDashboard() {
 
                           return (
                             <tr key={member.id} className="hover:bg-slate-50/80 transition">
-                              <td className="p-3 font-semibold text-slate-900">{member.name || '미설정'}</td>
-                              <td className="p-3">
+                              <td className="p-3 font-semibold text-slate-900 whitespace-nowrap">
+                                {member.name || '미설정'}
+                              </td>
+                              <td className="p-3 whitespace-nowrap">
                                 {member.gender ? (
                                   <span
-                                    className={`px-2 py-0.5 rounded font-semibold text-[11px] ${
+                                    className={`px-2 py-0.5 rounded font-semibold text-[11px] whitespace-nowrap ${
                                       isMale(member.gender) ? 'bg-blue-50 text-blue-600' : 'bg-rose-50 text-rose-600'
                                     }`}
                                   >
@@ -928,14 +970,14 @@ export default function ClubMainDashboard() {
                                   <span className="text-slate-400">-</span>
                                 )}
                               </td>
-                              <td className="p-3 text-slate-700">{member.nationality || '-'}</td>
-                              <td className="p-3">
+                              <td className="p-3 text-slate-700 whitespace-nowrap">{member.nationality || '-'}</td>
+                              <td className="p-3 whitespace-nowrap">
                                 {cleanInsta ? (
                                   <a
                                     href={`https://instagram.com/${cleanInsta}`}
                                     target="_blank"
                                     rel="noopener noreferrer"
-                                    className="text-pink-600 hover:text-pink-700 font-medium hover:underline inline-flex items-center gap-1"
+                                    className="text-pink-600 hover:text-pink-700 font-medium hover:underline inline-flex items-center gap-1 whitespace-nowrap"
                                   >
                                     <span>@{cleanInsta}</span>
                                     <svg className="w-3 h-3 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -946,17 +988,17 @@ export default function ClubMainDashboard() {
                                   <span className="text-slate-400">-</span>
                                 )}
                               </td>
-                              <td className="p-3 text-slate-600">
+                              <td className="p-3 text-slate-600 whitespace-nowrap">
                                 <span className="font-medium text-slate-700">KR:</span> {normalizeLevel(member.korean_level, '-')} /{' '}
                                 <span className="font-medium text-slate-700">JP:</span> {normalizeLevel(member.japanese_level, '-')}
                               </td>
-                              <td className="p-3">
+                              <td className="p-3 whitespace-nowrap">
                                 {member.role === 'ADMIN' ? (
-                                  <span className="px-2 py-0.5 bg-purple-100 text-purple-700 font-bold rounded text-[11px]">
+                                  <span className="px-2 py-0.5 bg-purple-100 text-purple-700 font-bold rounded text-[11px] whitespace-nowrap">
                                     👑 총괄 관리자
                                   </span>
                                 ) : (
-                                  <span className="px-2 py-0.5 bg-slate-100 text-slate-600 rounded text-[11px]">
+                                  <span className="px-2 py-0.5 bg-slate-100 text-slate-600 rounded text-[11px] whitespace-nowrap">
                                     일반 회원
                                   </span>
                                 )}
