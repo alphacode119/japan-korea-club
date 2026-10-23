@@ -28,15 +28,27 @@ interface ApplicationItem {
   created_at: string
 }
 
+interface MemberProfile {
+  id: string
+  name: string
+  age?: number
+  gender?: string
+  nationality?: string
+  instagram_id?: string
+  role?: string
+  created_at?: string
+}
+
 export default function ClubMainDashboard() {
   const router = useRouter()
   const [currentUser, setCurrentUser] = useState<any>(null)
   const [userProfile, setUserProfile] = useState<any>(null)
   const [events, setEvents] = useState<EventItem[]>([])
   const [applications, setApplications] = useState<ApplicationItem[]>([])
-  const [myApplications, setMyApplications] = useState<string[]>([]) // 내가 신청한 event_id 목록
+  const [allMembers, setAllMembers] = useState<MemberProfile[]>([])
+  const [myApplications, setMyApplications] = useState<{ [eventId: string]: string }>({}) // { event_id: application_id }
   const [selectedEvent, setSelectedEvent] = useState<EventItem | null>(null)
-  const [statusMessage, setStatusMessage] = useState('')
+  const [activeTab, setActiveTab] = useState<'applications' | 'members'>('applications')
   const [loading, setLoading] = useState(true)
 
   // 신청 폼 상태
@@ -81,7 +93,6 @@ export default function ClubMainDashboard() {
 
       if (profile) {
         setUserProfile(profile)
-        // 폼 기본값 세팅
         setApplyForm((prev) => ({
           ...prev,
           name: profile.name || '',
@@ -90,7 +101,7 @@ export default function ClubMainDashboard() {
         }))
       }
 
-      await loadEvents(user.id, profile?.role === 'ADMIN')
+      await loadAllData(user.id, profile?.role === 'ADMIN')
     } catch (err: any) {
       console.error(err)
     } finally {
@@ -98,8 +109,8 @@ export default function ClubMainDashboard() {
     }
   }
 
-  const loadEvents = async (userId: string, isAdmin: boolean) => {
-    // 1. 모임 목록 가져오기
+  const loadAllData = async (userId: string, isAdmin: boolean) => {
+    // 1. 모임 목록 조회
     const { data: eventData } = await supabase
       .from('events')
       .select('*')
@@ -107,23 +118,33 @@ export default function ClubMainDashboard() {
 
     if (eventData) setEvents(eventData)
 
-    // 2. 내가 신청한 목록 확인
+    // 2. 내가 신청한 모임 목록 및 신청 ID 조회
     const { data: myApps } = await supabase
       .from('event_applications')
-      .select('event_id')
+      .select('id, event_id')
       .eq('user_id', userId)
 
     if (myApps) {
-      setMyApplications(myApps.map((a: any) => a.event_id))
+      const mapping: { [eventId: string]: string } = {}
+      myApps.forEach((item: any) => {
+        mapping[item.event_id] = item.id
+      })
+      setMyApplications(mapping)
     }
 
-    // 3. 관리자라면 전체 신청자 명부 가져오기
+    // 3. 관리자일 경우 전체 신청 명부 및 전체 회원 목록 조회
     if (isAdmin) {
       const { data: allApps } = await supabase
         .from('event_applications')
         .select('*')
         .order('created_at', { ascending: false })
       if (allApps) setApplications(allApps)
+
+      const { data: members } = await supabase
+        .from('profiles')
+        .select('*')
+        .order('created_at', { ascending: false })
+      if (members) setAllMembers(members)
     }
   }
 
@@ -151,7 +172,7 @@ export default function ClubMainDashboard() {
     if (error) {
       alert('신청 실패: ' + error.message)
     } else {
-      // 모임 인원수 +1 업데이트
+      // 모임 인원수 +1
       await supabase
         .from('events')
         .update({ current_count: (selectedEvent.current_count || 0) + 1 })
@@ -159,8 +180,40 @@ export default function ClubMainDashboard() {
 
       alert('참가 신청이 완료되었습니다!')
       setSelectedEvent(null)
-      loadEvents(currentUser.id, userProfile?.role === 'ADMIN')
+      loadAllData(currentUser.id, userProfile?.role === 'ADMIN')
     }
+  }
+
+  // ★ 모임 신청 취소 기능 ★
+  const handleCancelApplication = async (eventId: string) => {
+    if (!confirm('정말로 모임 참가 신청을 취소하시겠습니까?')) return
+
+    const applicationId = myApplications[eventId]
+    if (!applicationId) return
+
+    // 1. 신청 내역 삭제
+    const { error } = await supabase
+      .from('event_applications')
+      .delete()
+      .eq('id', applicationId)
+
+    if (error) {
+      alert('신청 취소 실패: ' + error.message)
+      return
+    }
+
+    // 2. 모임 인원수 -1 차감
+    const targetEvent = events.find((e) => e.id === eventId)
+    if (targetEvent) {
+      const updatedCount = Math.max((targetEvent.current_count || 1) - 1, 0)
+      await supabase
+        .from('events')
+        .update({ current_count: updatedCount })
+        .eq('id', eventId)
+    }
+
+    alert('모임 참가 신청이 취소되었습니다.')
+    loadAllData(currentUser.id, userProfile?.role === 'ADMIN')
   }
 
   // 모임 생성 (관리자용)
@@ -184,7 +237,7 @@ export default function ClubMainDashboard() {
     } else {
       alert('새 모임 일정이 등록되었습니다!')
       setNewEvent({ title: '', event_date: '', location: '', max_count: 20, description: '' })
-      loadEvents(currentUser.id, true)
+      loadAllData(currentUser.id, true)
     }
   }
 
@@ -205,7 +258,7 @@ export default function ClubMainDashboard() {
 
   return (
     <div className="min-h-screen bg-slate-100 text-slate-800 pb-20">
-      {/* 헤더 */}
+      {/* 상단 헤더 */}
       <header className="bg-white border-b border-slate-200 sticky top-0 z-30">
         <div className="max-w-6xl mx-auto px-4 py-3 flex justify-between items-center">
           <div className="flex items-center gap-2">
@@ -227,7 +280,9 @@ export default function ClubMainDashboard() {
                   일반회원
                 </span>
               )}
-              <p className="text-xs text-pink-600 font-medium">@{userProfile?.instagram_id}</p>
+              {userProfile?.instagram_id && (
+                <p className="text-xs text-pink-600 font-medium">@{userProfile.instagram_id.replace(/^@/, '')}</p>
+              )}
             </div>
             <button
               onClick={handleLogout}
@@ -246,7 +301,7 @@ export default function ClubMainDashboard() {
             <h2 className="text-lg font-bold text-slate-900 flex items-center gap-2">
               <span>📅</span> 예정된 교류회 일정
             </h2>
-            <span className="text-xs text-slate-500">신청 후 자유롭게 참가가 가능합니다</span>
+            <span className="text-xs text-slate-500">자유롭게 신청 및 취소가 가능합니다</span>
           </div>
 
           {events.length === 0 ? (
@@ -256,7 +311,7 @@ export default function ClubMainDashboard() {
           ) : (
             <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-5">
               {events.map((ev) => {
-                const isApplied = myApplications.includes(ev.id)
+                const isApplied = !!myApplications[ev.id]
                 const isFull = ev.max_count > 0 && ev.current_count >= ev.max_count
 
                 return (
@@ -290,12 +345,20 @@ export default function ClubMainDashboard() {
 
                     <div className="pt-4 mt-3 border-t border-slate-100">
                       {isApplied ? (
-                        <button
-                          disabled
-                          className="w-full py-2.5 bg-emerald-50 text-emerald-700 font-bold text-xs rounded-xl border border-emerald-200 cursor-default"
-                        >
-                          ✓ 참가 신청 완료
-                        </button>
+                        <div className="flex gap-2">
+                          <button
+                            disabled
+                            className="flex-1 py-2.5 bg-emerald-50 text-emerald-700 font-bold text-xs rounded-xl border border-emerald-200 cursor-default"
+                          >
+                            ✓ 참가 확정
+                          </button>
+                          <button
+                            onClick={() => handleCancelApplication(ev.id)}
+                            className="px-3 py-2.5 bg-rose-50 hover:bg-rose-100 text-rose-600 font-bold text-xs rounded-xl border border-rose-200 transition"
+                          >
+                            신청 취소
+                          </button>
+                        </div>
                       ) : isFull ? (
                         <button
                           disabled
@@ -446,7 +509,7 @@ export default function ClubMainDashboard() {
           </div>
         )}
 
-        {/* 관리자(ADMIN) 전용 섹션: 모임 개설 & 전체 신청자 명부 */}
+        {/* 관리자(ADMIN) 전용 섹션 */}
         {isAdmin && (
           <div className="space-y-8 pt-6 border-t border-slate-200">
             {/* 1. 관리자: 새 모임 생성 */}
@@ -497,7 +560,7 @@ export default function ClubMainDashboard() {
                     <input
                       type="number"
                       required
-                      placeholder="20"
+                      placeholder="20 (0 입력시 무제한)"
                       value={newEvent.max_count}
                       onChange={(e) => setNewEvent({ ...newEvent, max_count: Number(e.target.value) })}
                       className="w-full p-2.5 border rounded-xl"
@@ -525,89 +588,196 @@ export default function ClubMainDashboard() {
               </form>
             </div>
 
-            {/* 2. 관리자: 참가자 통합 명부 표 (인스타 외부 링크 복구 완료) */}
+            {/* 2. 관리자 탭 명부: [모임별 신청 명부] / [전체 회원 목록] */}
             <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
-              <div className="flex justify-between items-center mb-4">
-                <h3 className="font-bold text-base text-slate-900 flex items-center gap-2">
-                  <span>📋</span> 모임별 참가 신청 명부 (관리자 전용)
-                </h3>
-                <span className="text-xs text-slate-500">총 {applications.length}명 신청 완료</span>
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setActiveTab('applications')}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition ${
+                      activeTab === 'applications'
+                        ? 'bg-slate-900 text-white shadow-sm'
+                        : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                    }`}
+                  >
+                    📋 모임별 참가 신청 명부 ({applications.length}건)
+                  </button>
+                  <button
+                    onClick={() => setActiveTab('members')}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition ${
+                      activeTab === 'members'
+                        ? 'bg-slate-900 text-white shadow-sm'
+                        : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                    }`}
+                  >
+                    👥 전체 회원 명부 ({allMembers.length}명)
+                  </button>
+                </div>
+                <span className="text-xs text-slate-400">아이디 클릭 시 상대방 인스타로 바로 연결됩니다</span>
               </div>
 
-              <div className="overflow-x-auto">
-                <table className="w-full text-left text-xs border-collapse">
-                  <thead>
-                    <tr className="bg-slate-50 text-slate-600 border-b">
-                      <th className="p-3">모임명</th>
-                      <th className="p-3">이름</th>
-                      <th className="p-3">나이</th>
-                      <th className="p-3">성별</th>
-                      <th className="p-3">국적</th>
-                      <th className="p-3">인스타그램 (클릭시 이동)</th>
-                      <th className="p-3">어학 실력</th>
-                      <th className="p-3">첫 참가</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100">
-                    {applications.length === 0 ? (
-                      <tr>
-                        <td colSpan={8} className="p-8 text-center text-slate-400">
-                          아직 접수된 참가 신청이 없습니다.
-                        </td>
+              {/* 탭 1: 모임별 참가 신청 명부 */}
+              {activeTab === 'applications' && (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs border-collapse">
+                    <thead>
+                      <tr className="bg-slate-50 text-slate-600 border-b">
+                        <th className="p-3">모임명</th>
+                        <th className="p-3">이름</th>
+                        <th className="p-3">나이</th>
+                        <th className="p-3">성별</th>
+                        <th className="p-3">국적</th>
+                        <th className="p-3">인스타그램 (클릭 시 이동)</th>
+                        <th className="p-3">어학 실력</th>
+                        <th className="p-3">첫 참가</th>
                       </tr>
-                    ) : (
-                      applications.map((app) => {
-                        const matchedEvent = events.find((e) => e.id === app.event_id)
-                        const cleanInsta = app.instagram_id.replace(/^@/, '').trim()
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {applications.length === 0 ? (
+                        <tr>
+                          <td colSpan={8} className="p-8 text-center text-slate-400">
+                            접수된 모임 참가 신청이 없습니다.
+                          </td>
+                        </tr>
+                      ) : (
+                        applications.map((app) => {
+                          const matchedEvent = events.find((e) => e.id === app.event_id)
+                          const cleanInsta = app.instagram_id ? app.instagram_id.replace(/^@/, '').trim() : ''
 
-                        return (
-                          <tr key={app.id} className="hover:bg-slate-50/80 transition">
-                            <td className="p-3 font-semibold text-slate-800">{matchedEvent?.title || '모임'}</td>
-                            <td className="p-3 font-medium text-slate-900">{app.name}</td>
-                            <td className="p-3 text-slate-600">{app.age}세</td>
-                            <td className="p-3">
-                              <span
-                                className={`px-2 py-0.5 rounded font-semibold text-[11px] ${
-                                  app.gender === '남' ? 'bg-blue-50 text-blue-600' : 'bg-rose-50 text-rose-600'
-                                }`}
-                              >
-                                {app.gender === '남' ? '남 男' : '여 女'}
-                              </span>
-                            </td>
-                            <td className="p-3 text-slate-700">{app.nationality}</td>
-                            
-                            {/* ★ 인스타그램 프로필 클릭 시 새 창으로 바로 이동하는 링크 태그 복구 완료 ★ */}
-                            <td className="p-3">
-                              <a
-                                href={`https://instagram.com/${cleanInsta}`}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="text-pink-600 hover:text-pink-700 font-medium hover:underline inline-flex items-center gap-1"
-                              >
-                                <span>@{cleanInsta}</span>
-                                <svg className="w-3 h-3 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
-                                </svg>
-                              </a>
-                            </td>
-
-                            <td className="p-3 text-slate-600">{app.language_level}</td>
-                            <td className="p-3">
-                              {app.is_first ? (
-                                <span className="px-2 py-0.5 bg-amber-50 text-amber-600 rounded text-[11px] font-semibold">
-                                  첫참가
+                          return (
+                            <tr key={app.id} className="hover:bg-slate-50/80 transition">
+                              <td className="p-3 font-semibold text-slate-800">{matchedEvent?.title || '모임'}</td>
+                              <td className="p-3 font-medium text-slate-900">{app.name}</td>
+                              <td className="p-3 text-slate-600">{app.age}세</td>
+                              <td className="p-3">
+                                <span
+                                  className={`px-2 py-0.5 rounded font-semibold text-[11px] ${
+                                    app.gender === '남' ? 'bg-blue-50 text-blue-600' : 'bg-rose-50 text-rose-600'
+                                  }`}
+                                >
+                                  {app.gender === '남' ? '남 男' : '여 女'}
                                 </span>
-                              ) : (
-                                <span className="text-slate-400">재참가</span>
-                              )}
-                            </td>
-                          </tr>
-                        )
-                      })
-                    )}
-                  </tbody>
-                </table>
-              </div>
+                              </td>
+                              <td className="p-3 text-slate-700">{app.nationality}</td>
+                              
+                              {/* 인스타그램 바로가기 링크 */}
+                              <td className="p-3">
+                                {cleanInsta ? (
+                                  <a
+                                    href={`https://instagram.com/${cleanInsta}`}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="text-pink-600 hover:text-pink-700 font-medium hover:underline inline-flex items-center gap-1"
+                                  >
+                                    <span>@{cleanInsta}</span>
+                                    <svg className="w-3 h-3 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                                    </svg>
+                                  </a>
+                                ) : (
+                                  <span className="text-slate-400">-</span>
+                                )}
+                              </td>
+
+                              <td className="p-3 text-slate-600">{app.language_level}</td>
+                              <td className="p-3">
+                                {app.is_first ? (
+                                  <span className="px-2 py-0.5 bg-amber-50 text-amber-600 rounded text-[11px] font-semibold">
+                                    첫참가
+                                  </span>
+                                ) : (
+                                  <span className="text-slate-400">재참가</span>
+                                )}
+                              </td>
+                            </tr>
+                          )
+                        })
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+
+              {/* 탭 2: 전체 회원 명부 (인스타그램 외부 이동 링크 적용) */}
+              {activeTab === 'members' && (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs border-collapse">
+                    <thead>
+                      <tr className="bg-slate-50 text-slate-600 border-b">
+                        <th className="p-3">이름 / 닉네임</th>
+                        <th className="p-3">인스타그램 (클릭 시 이동)</th>
+                        <th className="p-3">성별</th>
+                        <th className="p-3">국적</th>
+                        <th className="p-3">회원 등급</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {allMembers.length === 0 ? (
+                        <tr>
+                          <td colSpan={5} className="p-8 text-center text-slate-400">
+                            등록된 회원이 없습니다.
+                          </td>
+                        </tr>
+                      ) : (
+                        allMembers.map((member) => {
+                          const cleanInsta = member.instagram_id ? member.instagram_id.replace(/^@/, '').trim() : ''
+
+                          return (
+                            <tr key={member.id} className="hover:bg-slate-50/80 transition">
+                              <td className="p-3 font-semibold text-slate-900">{member.name || '미설정'}</td>
+                              
+                              {/* 전체 멤버 표에서도 인스타그램 바로가기 링크 적용 */}
+                              <td className="p-3">
+                                {cleanInsta ? (
+                                  <a
+                                    href={`https://instagram.com/${cleanInsta}`}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="text-pink-600 hover:text-pink-700 font-medium hover:underline inline-flex items-center gap-1"
+                                  >
+                                    <span>@{cleanInsta}</span>
+                                    <svg className="w-3 h-3 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                                    </svg>
+                                  </a>
+                                ) : (
+                                  <span className="text-slate-400">-</span>
+                                )}
+                              </td>
+
+                              <td className="p-3">
+                                {member.gender ? (
+                                  <span
+                                    className={`px-2 py-0.5 rounded font-semibold text-[11px] ${
+                                      member.gender === '남' ? 'bg-blue-50 text-blue-600' : 'bg-rose-50 text-rose-600'
+                                    }`}
+                                  >
+                                    {member.gender === '남' ? '남 男' : '여 女'}
+                                  </span>
+                                ) : (
+                                  <span className="text-slate-400">-</span>
+                                )}
+                              </td>
+                              <td className="p-3 text-slate-700">{member.nationality || '-'}</td>
+                              <td className="p-3">
+                                {member.role === 'ADMIN' ? (
+                                  <span className="px-2 py-0.5 bg-purple-100 text-purple-700 font-bold rounded text-[11px]">
+                                    👑 총괄 관리자
+                                  </span>
+                                ) : (
+                                  <span className="px-2 py-0.5 bg-slate-100 text-slate-600 rounded text-[11px]">
+                                    일반 회원
+                                  </span>
+                                )}
+                              </td>
+                            </tr>
+                          )
+                        })
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </div>
           </div>
         )}
