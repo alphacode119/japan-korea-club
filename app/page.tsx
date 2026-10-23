@@ -46,10 +46,34 @@ export default function ClubMainDashboard() {
   const [events, setEvents] = useState<EventItem[]>([])
   const [applications, setApplications] = useState<ApplicationItem[]>([])
   const [allMembers, setAllMembers] = useState<MemberProfile[]>([])
-  const [myApplications, setMyApplications] = useState<{ [eventId: string]: string }>({}) // { event_id: application_id }
+  const [myApplications, setMyApplications] = useState<{ [eventId: string]: string }>({})
   const [selectedEvent, setSelectedEvent] = useState<EventItem | null>(null)
   const [activeTab, setActiveTab] = useState<'applications' | 'members'>('applications')
   const [loading, setLoading] = useState(true)
+
+  // 남성 판별 함수
+  const isMale = (gender?: string) => {
+    if (!gender) return false
+    const g = gender.trim().toLowerCase()
+    return g === 'male' || g === '남' || g === '남자' || g === 'm'
+  }
+
+  // datetime-local 값(YYYY-MM-DDTHH:mm)을 보기 좋은 형태(YYYY-MM-DD (요일) HH:mm)로 변환
+  const formatDateTimeString = (rawDate: string) => {
+    if (!rawDate) return ''
+    const dt = new Date(rawDate)
+    if (isNaN(dt.getTime())) return rawDate
+
+    const year = dt.getFullYear()
+    const month = String(dt.getMonth() + 1).padStart(2, '0')
+    const day = String(dt.getDate()).padStart(2, '0')
+    const days = ['일', '월', '화', '수', '목', '금', '토']
+    const dayOfWeek = days[dt.getDay()]
+    const hours = String(dt.getHours()).padStart(2, '0')
+    const minutes = String(dt.getMinutes()).padStart(2, '0')
+
+    return `${year}-${month}-${day} (${dayOfWeek}) ${hours}:${minutes}`
+  }
 
   // 신청 폼 상태
   const [applyForm, setApplyForm] = useState({
@@ -62,7 +86,7 @@ export default function ClubMainDashboard() {
     is_first: true,
   })
 
-  // 신규 모임 생성 폼 (관리자용)
+  // 신규 모임 생성 폼 (관리자용) - event_date에 datetime-local 값 바인딩
   const [newEvent, setNewEvent] = useState({
     title: '',
     event_date: '',
@@ -70,13 +94,6 @@ export default function ClubMainDashboard() {
     max_count: 20,
     description: '',
   })
-
-  // ★ male / 남 모두 정확하게 남성으로 인식하는 함수
-  const isMale = (gender?: string) => {
-    if (!gender) return false
-    const g = gender.trim().toLowerCase()
-    return g === 'male' || g === '남' || g === '남자' || g === 'm'
-  }
 
   useEffect(() => {
     initDashboard()
@@ -103,8 +120,8 @@ export default function ClubMainDashboard() {
         setApplyForm((prev) => ({
           ...prev,
           name: profile.name || '',
-          gender: profile.gender || '남',
-          instagram_id: profile.instagram_id || '',
+          gender: isMale(profile.gender) ? '남' : '여',
+          instagram_id: profile.instagram_id ? profile.instagram_id.replace(/^@/, '').trim() : '',
         }))
       }
 
@@ -191,7 +208,7 @@ export default function ClubMainDashboard() {
     }
   }
 
-  // ★ 모임 신청 취소 기능 ★
+  // 모임 신청 취소 기능
   const handleCancelApplication = async (eventId: string) => {
     if (!confirm('정말로 모임 참가 신청을 취소하시겠습니까?')) return
 
@@ -226,12 +243,18 @@ export default function ClubMainDashboard() {
   // 모임 생성 (관리자용)
   const handleCreateEvent = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!newEvent.title || !newEvent.event_date) return
+    if (!newEvent.title || !newEvent.event_date) {
+      alert('모임명과 일시를 모두 입력해주세요.')
+      return
+    }
+
+    // 달력 선택 값을 깔끔한 일시 형식으로 변환
+    const formattedDate = formatDateTimeString(newEvent.event_date)
 
     const { error } = await supabase.from('events').insert([
       {
         title: newEvent.title,
-        event_date: newEvent.event_date,
+        event_date: formattedDate,
         location: newEvent.location,
         max_count: Number(newEvent.max_count),
         current_count: 0,
@@ -313,7 +336,7 @@ export default function ClubMainDashboard() {
 
           {events.length === 0 ? (
             <div className="bg-white p-10 rounded-2xl border text-center text-slate-400 text-sm">
-              현재 예정된 모임 일정이 없습니다.
+              현재 예정된 모임 일정이 없습니다. 아래에서 새 모임을 등록해 보세요.
             </div>
           ) : (
             <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-5">
@@ -375,7 +398,17 @@ export default function ClubMainDashboard() {
                         </button>
                       ) : (
                         <button
-                          onClick={() => setSelectedEvent(ev)}
+                          onClick={() => {
+                            setApplyForm((prev) => ({
+                              ...prev,
+                              name: userProfile?.name || prev.name,
+                              gender: isMale(userProfile?.gender) ? '남' : '여',
+                              instagram_id: userProfile?.instagram_id
+                                ? userProfile.instagram_id.replace(/^@/, '').trim()
+                                : prev.instagram_id,
+                            }))
+                            setSelectedEvent(ev)
+                          }}
                           className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-xl shadow-sm transition active:scale-[0.99]"
                         >
                           참가 신청하기
@@ -531,21 +564,21 @@ export default function ClubMainDashboard() {
                     <input
                       type="text"
                       required
-                      placeholder="예: 11월 홍대 한일 교류회"
+                      placeholder="예: 홍대 한일 교류회"
                       value={newEvent.title}
                       onChange={(e) => setNewEvent({ ...newEvent, title: e.target.value })}
                       className="w-full p-2.5 border rounded-xl"
                     />
                   </div>
                   <div>
-                    <label className="block font-semibold text-slate-700 mb-1">일시</label>
+                    <label className="block font-semibold text-slate-700 mb-1">일시 (달력/시간 선택)</label>
+                    {/* 달력 및 시간 선택 팝업 input */}
                     <input
-                      type="text"
+                      type="datetime-local"
                       required
-                      placeholder="예: 2026-11-15 (일) 18:00"
                       value={newEvent.event_date}
                       onChange={(e) => setNewEvent({ ...newEvent, event_date: e.target.value })}
-                      className="w-full p-2.5 border rounded-xl"
+                      className="w-full p-2.5 border rounded-xl bg-white text-slate-800"
                     />
                   </div>
                 </div>
@@ -666,8 +699,6 @@ export default function ClubMainDashboard() {
                                 </span>
                               </td>
                               <td className="p-3 text-slate-700">{app.nationality}</td>
-                              
-                              {/* 인스타그램 바로가기 링크 */}
                               <td className="p-3">
                                 {cleanInsta ? (
                                   <a
@@ -685,7 +716,6 @@ export default function ClubMainDashboard() {
                                   <span className="text-slate-400">-</span>
                                 )}
                               </td>
-
                               <td className="p-3 text-slate-600">{app.language_level}</td>
                               <td className="p-3">
                                 {app.is_first ? (
@@ -705,7 +735,7 @@ export default function ClubMainDashboard() {
                 </div>
               )}
 
-              {/* 탭 2: 전체 회원 명부 (인스타그램 외부 이동 링크 적용) */}
+              {/* 탭 2: 전체 회원 명부 */}
               {activeTab === 'members' && (
                 <div className="overflow-x-auto">
                   <table className="w-full text-left text-xs border-collapse">
@@ -732,8 +762,6 @@ export default function ClubMainDashboard() {
                           return (
                             <tr key={member.id} className="hover:bg-slate-50/80 transition">
                               <td className="p-3 font-semibold text-slate-900">{member.name || '미설정'}</td>
-                              
-                              {/* 전체 멤버 표에서도 인스타그램 바로가기 링크 적용 */}
                               <td className="p-3">
                                 {cleanInsta ? (
                                   <a
@@ -751,7 +779,6 @@ export default function ClubMainDashboard() {
                                   <span className="text-slate-400">-</span>
                                 )}
                               </td>
-
                               <td className="p-3">
                                 {member.gender ? (
                                   <span
