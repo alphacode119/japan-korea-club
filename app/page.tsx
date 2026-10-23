@@ -71,8 +71,8 @@ export default function ClubMainDashboard() {
     description: '',
   })
 
-  // ★ DB의 male, 남, 남자, m 값을 모두 정확하게 남성으로 판정하는 헬퍼 함수
-  const isMaleGender = (gender?: string) => {
+  // ★ male / 남 모두 정확하게 남성으로 인식하는 함수
+  const isMale = (gender?: string) => {
     if (!gender) return false
     const g = gender.trim().toLowerCase()
     return g === 'male' || g === '남' || g === '남자' || g === 'm'
@@ -650,22 +650,19 @@ export default function ClubMainDashboard() {
                         applications.map((app) => {
                           const matchedEvent = events.find((e) => e.id === app.event_id)
                           const cleanInsta = app.instagram_id ? app.instagram_id.replace(/^@/, '').trim() : ''
-                          const isMale = isMaleGender(app.gender)
 
                           return (
                             <tr key={app.id} className="hover:bg-slate-50/80 transition">
                               <td className="p-3 font-semibold text-slate-800">{matchedEvent?.title || '모임'}</td>
                               <td className="p-3 font-medium text-slate-900">{app.name}</td>
                               <td className="p-3 text-slate-600">{app.age}세</td>
-                              
-                              {/* ★ male, 남 모두 정확히 파란색 남성으로 표시 ★ */}
                               <td className="p-3">
                                 <span
                                   className={`px-2 py-0.5 rounded font-semibold text-[11px] ${
-                                    isMale ? 'bg-blue-50 text-blue-600' : 'bg-rose-50 text-rose-600'
+                                    isMale(app.gender) ? 'bg-blue-50 text-blue-600' : 'bg-rose-50 text-rose-600'
                                   }`}
                                 >
-                                  {isMale ? '남 男' : '여 女'}
+                                  {isMale(app.gender) ? '남 男' : '여 女'}
                                 </span>
                               </td>
                               <td className="p-3 text-slate-700">{app.nationality}</td>
@@ -708,7 +705,7 @@ export default function ClubMainDashboard() {
                 </div>
               )}
 
-              {/* 탭 2: 전체 회원 명부 */}
+              {/* 탭 2: 전체 회원 명부 (인스타그램 외부 이동 링크 적용) */}
               {activeTab === 'members' && (
                 <div className="overflow-x-auto">
                   <table className="w-full text-left text-xs border-collapse">
@@ -731,7 +728,6 @@ export default function ClubMainDashboard() {
                       ) : (
                         allMembers.map((member) => {
                           const cleanInsta = member.instagram_id ? member.instagram_id.replace(/^@/, '').trim() : ''
-                          const isMale = isMaleGender(member.gender)
 
                           return (
                             <tr key={member.id} className="hover:bg-slate-50/80 transition">
@@ -756,21 +752,19 @@ export default function ClubMainDashboard() {
                                 )}
                               </td>
 
-                              {/* ★ DB 값이 male인 회원을 남 男으로 정확히 판정 ★ */}
                               <td className="p-3">
                                 {member.gender ? (
                                   <span
                                     className={`px-2 py-0.5 rounded font-semibold text-[11px] ${
-                                      isMale ? 'bg-blue-50 text-blue-600' : 'bg-rose-50 text-rose-600'
+                                      isMale(member.gender) ? 'bg-blue-50 text-blue-600' : 'bg-rose-50 text-rose-600'
                                     }`}
                                   >
-                                    {isMale ? '남 男' : '여 女'}
+                                    {isMale(member.gender) ? '남 男' : '여 女'}
                                   </span>
                                 ) : (
                                   <span className="text-slate-400">-</span>
                                 )}
                               </td>
-
                               <td className="p-3 text-slate-700">{member.nationality || '-'}</td>
                               <td className="p-3">
                                 {member.role === 'ADMIN' ? (
