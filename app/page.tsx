@@ -52,11 +52,11 @@ export default function ClubMainDashboard() {
   const [activeTab, setActiveTab] = useState<'applications' | 'members'>('applications')
   const [loading, setLoading] = useState(true)
 
-  // 신청 폼 상태 (로그인 정보 외 신청 시 선택할 항목들)
+  // 신청 폼 상태 (로그인 정보 외 신청 시 선택할 항목)
   const [applyForm, setApplyForm] = useState({
     language_level: '중급',
     is_first: true, // true: 첫 참가, false: 기존 참가
-    participation_count: 2, // 기존 참가일 경우 회차 (기본 2회차부터)
+    participation_count: 2, // 기존 참가일 경우 회차 (기본 2회차)
   })
 
   // 신규 모임 생성 폼 (관리자용)
@@ -67,6 +67,13 @@ export default function ClubMainDashboard() {
     max_count: 20,
     description: '',
   })
+
+  // ★ male / female / 남 / 여 모두 정확하게 판정하는 헬퍼 함수
+  const isMaleGender = (gender?: string) => {
+    if (!gender) return false
+    const g = gender.trim().toLowerCase()
+    return g === 'male' || g === '남' || g === '남자' || g === 'm'
+  }
 
   useEffect(() => {
     initDashboard()
@@ -139,7 +146,7 @@ export default function ClubMainDashboard() {
     }
   }
 
-  // 모임 참가 신청 처리 (로그인 회원 정보 자동 바인딩)
+  // 모임 참가 신청 처리 (로그인 회원 정보 자동 연동)
   const handleApply = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!selectedEvent || !currentUser || !userProfile) return
@@ -151,7 +158,7 @@ export default function ClubMainDashboard() {
       user_id: currentUser.id,
       name: userProfile.name || '회원',
       age: userProfile.age || 20,
-      gender: userProfile.gender || '남',
+      gender: userProfile.gender || 'male',
       nationality: userProfile.nationality || '한국',
       instagram_id: cleanInsta,
       language_level: applyForm.language_level,
@@ -374,7 +381,7 @@ export default function ClubMainDashboard() {
           )}
         </section>
 
-        {/* 참가 신청 모달 (로그인 정보 고정 + 참가 횟수 선택 복구) */}
+        {/* 참가 신청 모달 (로그인 정보 고정 + 참가 횟수 선택) */}
         {selectedEvent && (
           <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
             <div className="bg-white w-full max-w-md rounded-2xl p-6 shadow-xl space-y-4">
@@ -391,7 +398,7 @@ export default function ClubMainDashboard() {
                 <p className="text-indigo-600 mt-0.5">일시: {selectedEvent.event_date} | 장소: {selectedEvent.location}</p>
               </div>
 
-              {/* 1. 로그인 회원 정보 고정 카드 (입력 불필요) */}
+              {/* 1. 로그인 회원 정보 고정 카드 (male 값 정확히 남성으로 표기) */}
               <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-2 text-xs">
                 <div className="flex justify-between items-center border-b border-slate-200 pb-1.5">
                   <span className="font-bold text-slate-700">🔒 신청자 정보 (로그인 계정 고정)</span>
@@ -400,7 +407,11 @@ export default function ClubMainDashboard() {
                 <div className="grid grid-cols-2 gap-2 text-slate-600">
                   <div>이름: <span className="font-semibold text-slate-900">{userProfile?.name || '미설정'}</span></div>
                   <div>나이: <span className="font-semibold text-slate-900">{userProfile?.age ? `${userProfile.age}세` : '미설정'}</span></div>
-                  <div>성별: <span className="font-semibold text-slate-900">{userProfile?.gender === '남' ? '남 (男)' : '여 (女)'}</span></div>
+                  <div>
+                    성별: <span className="font-semibold text-slate-900">
+                      {isMaleGender(userProfile?.gender) ? '남 (男)' : '여 (女)'}
+                    </span>
+                  </div>
                   <div>국적: <span className="font-semibold text-slate-900">{userProfile?.nationality || '한국'}</span></div>
                 </div>
                 <div className="pt-1 text-slate-600">
@@ -408,7 +419,7 @@ export default function ClubMainDashboard() {
                 </div>
               </div>
 
-              {/* 2. 신청 시 선택할 폼 (어학 실력 & 첫참가/재참가 횟수) */}
+              {/* 2. 신청 시 선택할 폼 (어학 실력 & 첫 참가/재참가 횟수) */}
               <form onSubmit={handleApply} className="space-y-4 text-xs">
                 <div>
                   <label className="block font-semibold text-slate-700 mb-1">어학 실력</label>
@@ -424,7 +435,7 @@ export default function ClubMainDashboard() {
                   </select>
                 </div>
 
-                {/* ★ 참가 구분 (첫 참가 vs 기존 참가 몇 회차) ★ */}
+                {/* 참가 구분 */}
                 <div className="space-y-2 pt-1 border-t border-slate-100">
                   <label className="block font-semibold text-slate-700">참가 이력 구분</label>
                   <div className="grid grid-cols-2 gap-2">
@@ -452,9 +463,9 @@ export default function ClubMainDashboard() {
                     </button>
                   </div>
 
-                  {/* 재참가 선택 시 회차 입력 노출 */}
+                  {/* 재참가 선택 시 회차 입력 */}
                   {!applyForm.is_first && (
-                    <div className="p-3 bg-amber-50/70 border border-amber-200 rounded-xl space-y-1 mt-2 animate-fadeIn">
+                    <div className="p-3 bg-amber-50/70 border border-amber-200 rounded-xl space-y-1 mt-2">
                       <label className="block font-semibold text-amber-900">기존 참가 횟수 (이번 모임 포함 몇 번째인가요?)</label>
                       <select
                         value={applyForm.participation_count}
@@ -624,19 +635,22 @@ export default function ClubMainDashboard() {
                         applications.map((app) => {
                           const matchedEvent = events.find((e) => e.id === app.event_id)
                           const cleanInsta = app.instagram_id ? app.instagram_id.replace(/^@/, '').trim() : ''
+                          const isMale = isMaleGender(app.gender)
 
                           return (
                             <tr key={app.id} className="hover:bg-slate-50/80 transition">
                               <td className="p-3 font-semibold text-slate-800">{matchedEvent?.title || '모임'}</td>
                               <td className="p-3 font-medium text-slate-900">{app.name}</td>
                               <td className="p-3 text-slate-600">{app.age}세</td>
+                              
+                              {/* ★ male 정확히 인식하여 남 男 (파란색)으로 표기 ★ */}
                               <td className="p-3">
                                 <span
                                   className={`px-2 py-0.5 rounded font-semibold text-[11px] ${
-                                    app.gender === '남' ? 'bg-blue-50 text-blue-600' : 'bg-rose-50 text-rose-600'
+                                    isMale ? 'bg-blue-50 text-blue-600' : 'bg-rose-50 text-rose-600'
                                   }`}
                                 >
-                                  {app.gender === '남' ? '남 男' : '여 女'}
+                                  {isMale ? '남 男' : '여 女'}
                                 </span>
                               </td>
                               <td className="p-3 text-slate-700">{app.nationality}</td>
@@ -707,6 +721,7 @@ export default function ClubMainDashboard() {
                       ) : (
                         allMembers.map((member) => {
                           const cleanInsta = member.instagram_id ? member.instagram_id.replace(/^@/, '').trim() : ''
+                          const isMale = isMaleGender(member.gender)
 
                           return (
                             <tr key={member.id} className="hover:bg-slate-50/80 transition">
@@ -732,19 +747,22 @@ export default function ClubMainDashboard() {
                               </td>
 
                               <td className="p-3 text-slate-600">{member.age ? `${member.age}세` : '-'}</td>
+
+                              {/* ★ 전체 회원 명부에서도 male 정확히 인식 ★ */}
                               <td className="p-3">
                                 {member.gender ? (
                                   <span
                                     className={`px-2 py-0.5 rounded font-semibold text-[11px] ${
-                                      member.gender === '남' ? 'bg-blue-50 text-blue-600' : 'bg-rose-50 text-rose-600'
+                                      isMale ? 'bg-blue-50 text-blue-600' : 'bg-rose-50 text-rose-600'
                                     }`}
                                   >
-                                    {member.gender === '남' ? '남 男' : '여 女'}
+                                    {isMale ? '남 男' : '여 女'}
                                   </span>
                                 ) : (
                                   <span className="text-slate-400">-</span>
                                 )}
                               </td>
+
                               <td className="p-3 text-slate-700">{member.nationality || '-'}</td>
                               <td className="p-3">
                                 {member.role === 'ADMIN' ? (
