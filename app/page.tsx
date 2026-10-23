@@ -4,276 +4,234 @@ import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 
+interface EventItem {
+  id: string
+  title: string
+  event_date: string
+  location: string
+  max_count: number
+  current_count: number
+  description?: string
+}
+
+interface ApplicationItem {
+  id: string
+  event_id: string
+  user_id: string
+  name: string
+  age: number
+  gender: string
+  nationality: string
+  instagram_id: string
+  language_level: string
+  is_first: boolean
+  created_at: string
+}
+
 export default function ClubMainDashboard() {
   const router = useRouter()
-  const [profile, setProfile] = useState<any>(null)
-  const [events, setEvents] = useState<any[]>([])
-  const [eventApplications, setEventApplications] = useState<any[]>([]) // 모임 신청 명부
-  const [allMembers, setAllMembers] = useState<any[]>([]) // 전체 가입 회원
-  const [myApplications, setMyApplications] = useState<any[]>([]) // 내 신청 내역
-  const [selectedEventId, setSelectedEventId] = useState<string>('ALL')
+  const [currentUser, setCurrentUser] = useState<any>(null)
+  const [userProfile, setUserProfile] = useState<any>(null)
+  const [events, setEvents] = useState<EventItem[]>([])
+  const [applications, setApplications] = useState<ApplicationItem[]>([])
+  const [myApplications, setMyApplications] = useState<string[]>([]) // 내가 신청한 event_id 목록
+  const [selectedEvent, setSelectedEvent] = useState<EventItem | null>(null)
   const [statusMessage, setStatusMessage] = useState('')
-  const [isLoading, setIsLoading] = useState(true)
+  const [loading, setLoading] = useState(true)
 
-  // 신청하기 모달 상태
-  const [selectedEvent, setSelectedEvent] = useState<any>(null)
-  const [applyKoreanLevel, setApplyKoreanLevel] = useState('HIGH')
-  const [applyJapaneseLevel, setApplyJapaneseLevel] = useState('MID')
-  const [isFirstTime, setIsFirstTime] = useState(true)
-  const [attendanceCount, setAttendanceCount] = useState(1)
+  // 신청 폼 상태
+  const [applyForm, setApplyForm] = useState({
+    name: '',
+    age: '',
+    gender: '남',
+    nationality: '한국',
+    instagram_id: '',
+    language_level: '중급',
+    is_first: true,
+  })
 
-  // 새 모임 생성 폼 (관리자용)
-  const [newTitle, setNewTitle] = useState('')
-  const [newDate, setNewDate] = useState('')
-  const [newLocation, setNewLocation] = useState('')
-  const [newMax, setNewMax] = useState(20)
+  // 신규 모임 생성 폼 (관리자용)
+  const [newEvent, setNewEvent] = useState({
+    title: '',
+    event_date: '',
+    location: '',
+    max_count: 20,
+    description: '',
+  })
 
   useEffect(() => {
-    checkAuthAndLoadData()
+    initDashboard()
   }, [])
 
-  const checkAuthAndLoadData = async () => {
-    setIsLoading(true)
-
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user) {
-      router.push('/login')
-      return
-    }
-
-    // 프로필 조회
-    const { data: profileData } = await supabase
-      .from('profiles')
-      .select('*')
-      .eq('id', user.id)
-      .single()
-
-    if (profileData) {
-      setProfile(profileData)
-
-      if (profileData.role === 'ADMIN') {
-        // 관리자: 모임 신청자 명부 + 전체 가입 회원 명부 모두 조회
-        await Promise.all([fetchEvents(), fetchEventApplications(), fetchAllMembersList()])
-      } else {
-        // 일반 회원: 모임 스케줄 + 내 신청 내역만 조회
-        await Promise.all([fetchEvents(), fetchMyApplications(user.id)])
+  const initDashboard = async () => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) {
+        router.push('/login')
+        return
       }
-    }
+      setCurrentUser(user)
 
-    setIsLoading(false)
+      // 내 프로필 조회
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', user.id)
+        .single()
+
+      if (profile) {
+        setUserProfile(profile)
+        // 폼 기본값 세팅
+        setApplyForm((prev) => ({
+          ...prev,
+          name: profile.name || '',
+          gender: profile.gender || '남',
+          instagram_id: profile.instagram_id || '',
+        }))
+      }
+
+      await loadEvents(user.id, profile?.role === 'ADMIN')
+    } catch (err: any) {
+      console.error(err)
+    } finally {
+      setLoading(false)
+    }
   }
 
-  // 모임 목록 조회
-  const fetchEvents = async () => {
-    const { data } = await supabase
+  const loadEvents = async (userId: string, isAdmin: boolean) => {
+    // 1. 모임 목록 가져오기
+    const { data: eventData } = await supabase
       .from('events')
       .select('*')
       .order('event_date', { ascending: true })
 
-    setEvents(data || [])
-    if (data && data.length > 0 && selectedEventId === 'ALL') {
-      setSelectedEventId(data[0].id) // 기본값으로 첫 번째 모임 자동 선택
-    }
-  }
+    if (eventData) setEvents(eventData)
 
-  // [관리자 전용] 해당 모임별 참가 신청자 명부 조회 (profiles 테이블과 조인)
-  const fetchEventApplications = async () => {
-    const { data, error } = await supabase
+    // 2. 내가 신청한 목록 확인
+    const { data: myApps } = await supabase
       .from('event_applications')
-      .select(`
-        id,
-        event_id,
-        user_id,
-        korean_level,
-        japanese_level,
-        is_first_time,
-        attendance_count,
-        events:event_id ( id, title, event_date, location ),
-        profiles:user_id (
-          id,
-          name,
-          age,
-          gender,
-          instagram_id,
-          nationality,
-          is_blocked,
-          role
-        )
-      `)
-      .order('applied_at', { ascending: false })
-
-    if (!error && data) {
-      setEventApplications(data)
-    }
-  }
-
-  // [관리자 전용] 전체 가입 회원 명단 (신청 여부 무관)
-  const fetchAllMembersList = async () => {
-    const { data } = await supabase
-      .from('profiles')
-      .select('*')
-      .order('created_at', { ascending: false })
-
-    setAllMembers(data || [])
-  }
-
-  // [일반 회원 전용] 본인 신청 내역만 조회
-  const fetchMyApplications = async (userId: string) => {
-    const { data } = await supabase
-      .from('event_applications')
-      .select(`
-        id,
-        event_id,
-        korean_level,
-        japanese_level,
-        is_first_time,
-        attendance_count,
-        events ( title, event_date, location )
-      `)
+      .select('event_id')
       .eq('user_id', userId)
-      .order('applied_at', { ascending: false })
 
-    setMyApplications(data || [])
-  }
+    if (myApps) {
+      setMyApplications(myApps.map((a: any) => a.event_id))
+    }
 
-  // 회원 차단/해제 토글 (관리자)
-  const handleToggleBlockUser = async (targetUserId: string, currentStatus: boolean) => {
-    const { error } = await supabase
-      .from('profiles')
-      .update({ is_blocked: !currentStatus })
-      .eq('id', targetUserId)
-
-    if (error) {
-      alert('차단 상태 변경 실패: ' + error.message)
-    } else {
-      setStatusMessage(`회원 상태가 [${!currentStatus ? '차단(Blacklist)' : '정상'}]으로 변경되었습니다.`)
-      fetchEventApplications()
-      fetchAllMembersList()
-      if (targetUserId === profile.id) {
-        setProfile((prev: any) => ({ ...prev, is_blocked: !currentStatus }))
-      }
+    // 3. 관리자라면 전체 신청자 명부 가져오기
+    if (isAdmin) {
+      const { data: allApps } = await supabase
+        .from('event_applications')
+        .select('*')
+        .order('created_at', { ascending: false })
+      if (allApps) setApplications(allApps)
     }
   }
 
-  // 로그아웃
-  const handleLogout = async () => {
-    await supabase.auth.signOut()
-    router.push('/login')
-  }
-
-  // 신청 모달 열기
-  const handleOpenApplyModal = (ev: any) => {
-    if (profile?.is_blocked) {
-      alert('관리자에 의해 참가가 제한된 계정입니다. 신청할 수 없습니다.')
-      return
-    }
-    setSelectedEvent(ev)
-    setApplyKoreanLevel(profile.korean_level)
-    setApplyJapaneseLevel(profile.japanese_level)
-    setIsFirstTime(true)
-    setAttendanceCount(1)
-  }
-
-  // 참가 신청 제출
-  const handleSubmitApplication = async (e: React.FormEvent) => {
+  // 모임 신청 처리
+  const handleApply = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!selectedEvent || !profile) return
+    if (!selectedEvent || !currentUser) return
 
-    if (profile.is_blocked) {
-      alert('차단된 계정은 모임에 참가할 수 없습니다.')
-      return
-    }
+    const cleanInsta = applyForm.instagram_id.replace(/^@/, '').trim()
 
-    const newAppPayload = {
-      event_id: selectedEvent.id,
-      user_id: profile.id,
-      korean_level: applyKoreanLevel,
-      japanese_level: applyJapaneseLevel,
-      is_first_time: isFirstTime,
-      attendance_count: isFirstTime ? 1 : attendanceCount,
-    }
-
-    const { error } = await supabase.from('event_applications').insert([newAppPayload])
+    const { error } = await supabase.from('event_applications').insert([
+      {
+        event_id: selectedEvent.id,
+        user_id: currentUser.id,
+        name: applyForm.name,
+        age: parseInt(applyForm.age) || 20,
+        gender: applyForm.gender,
+        nationality: applyForm.nationality,
+        instagram_id: cleanInsta,
+        language_level: applyForm.language_level,
+        is_first: applyForm.is_first,
+      },
+    ])
 
     if (error) {
-      if (error.code === '23505') {
-        alert('이미 이 모임에 참가 신청을 완료하셨습니다!')
-      } else {
-        alert('신청 실패: ' + error.message)
-      }
-      return
-    }
-
-    setStatusMessage(`[${selectedEvent.title}] 모임 참가 신청이 완료되었습니다!`)
-    setSelectedEvent(null)
-    if (profile.role === 'ADMIN') {
-      fetchEventApplications()
+      alert('신청 실패: ' + error.message)
     } else {
-      fetchMyApplications(profile.id)
+      // 모임 인원수 +1 업데이트
+      await supabase
+        .from('events')
+        .update({ current_count: (selectedEvent.current_count || 0) + 1 })
+        .eq('id', selectedEvent.id)
+
+      alert('참가 신청이 완료되었습니다!')
+      setSelectedEvent(null)
+      loadEvents(currentUser.id, userProfile?.role === 'ADMIN')
     }
   }
 
-  // 모임 스케줄 생성 (관리자)
+  // 모임 생성 (관리자용)
   const handleCreateEvent = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!newTitle || !newDate || !newLocation) return
+    if (!newEvent.title || !newEvent.event_date) return
 
     const { error } = await supabase.from('events').insert([
       {
-        title: newTitle,
-        event_date: new Date(newDate).toISOString(),
-        location: newLocation,
-        max_participants: newMax,
+        title: newEvent.title,
+        event_date: newEvent.event_date,
+        location: newEvent.location,
+        max_count: Number(newEvent.max_count),
+        current_count: 0,
+        description: newEvent.description,
       },
     ])
 
     if (error) {
       alert('모임 등록 실패: ' + error.message)
-      return
+    } else {
+      alert('새 모임 일정이 등록되었습니다!')
+      setNewEvent({ title: '', event_date: '', location: '', max_count: 20, description: '' })
+      loadEvents(currentUser.id, true)
     }
-
-    setStatusMessage('새 교류회 스케줄이 등록되었습니다!')
-    setNewTitle('')
-    setNewDate('')
-    setNewLocation('')
-    fetchEvents()
   }
 
-  if (isLoading || !profile) {
+  const handleLogout = async () => {
+    await supabase.auth.signOut()
+    router.push('/login')
+  }
+
+  if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-slate-100 text-xs text-slate-500 font-medium">
-        사용자 정보 확인 중...
+      <div className="min-h-screen flex items-center justify-center bg-slate-50 text-slate-500 font-medium">
+        교류회 데이터를 불러오는 중...
       </div>
     )
   }
 
-  const isAdmin = profile.role === 'ADMIN'
-
-  // 선택된 모임에 신청한 명단 필터링
-  const currentEventApps = selectedEventId === 'ALL'
-    ? eventApplications
-    : eventApplications.filter((app) => app.event_id === selectedEventId)
+  const isAdmin = userProfile?.role === 'ADMIN'
 
   return (
-    <div className="min-h-screen bg-slate-100 font-sans text-slate-800 pb-20">
+    <div className="min-h-screen bg-slate-100 text-slate-800 pb-20">
       {/* 헤더 */}
-      <header className="bg-white border-b border-slate-200 sticky top-0 z-30 shadow-sm">
-        <div className="max-w-5xl mx-auto px-4 py-3 flex justify-between items-center">
+      <header className="bg-white border-b border-slate-200 sticky top-0 z-30">
+        <div className="max-w-6xl mx-auto px-4 py-3 flex justify-between items-center">
           <div className="flex items-center gap-2">
-            <span className="text-xl">🇰🇷🤝🇯🇵</span>
-            <span className="font-bold text-base text-slate-900 tracking-tight">한일 교류회 관리</span>
+            <span className="text-2xl">🤝</span>
+            <div>
+              <h1 className="font-bold text-lg text-slate-900 leading-tight">한일 교류회 (日韓交流会)</h1>
+              <p className="text-xs text-slate-400">한국인 & 일본인 친목 언어교환 플랫폼</p>
+            </div>
           </div>
-          <div className="flex items-center gap-2">
-            <span
-              className={`text-[11px] font-bold px-2.5 py-0.5 rounded-full ${
-                isAdmin ? 'bg-amber-100 text-amber-800 border border-amber-300' : 'bg-slate-100 text-slate-600'
-              }`}
-            >
-              {isAdmin ? '👑 총괄 관리자' : '일반 회원'}
-            </span>
+          <div className="flex items-center gap-3">
+            <div className="text-right">
+              <span className="text-sm font-semibold text-slate-800">{userProfile?.name || '회원'}</span>
+              {isAdmin ? (
+                <span className="ml-2 text-[11px] font-bold px-2 py-0.5 bg-purple-100 text-purple-700 rounded-full border border-purple-200">
+                  👑 총괄 관리자
+                </span>
+              ) : (
+                <span className="ml-2 text-[11px] font-medium px-2 py-0.5 bg-slate-100 text-slate-600 rounded-full">
+                  일반회원
+                </span>
+              )}
+              <p className="text-xs text-pink-600 font-medium">@{userProfile?.instagram_id}</p>
+            </div>
             <button
               onClick={handleLogout}
-              className="text-xs text-slate-500 hover:text-slate-800 px-2 py-1 bg-slate-100 hover:bg-slate-200 rounded-lg transition"
+              className="px-3 py-1.5 text-xs bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-lg transition"
             >
               로그아웃
             </button>
@@ -281,533 +239,379 @@ export default function ClubMainDashboard() {
         </div>
       </header>
 
-      {/* 상태 알림 메시지 */}
-      {statusMessage && (
-        <div className="max-w-5xl mx-auto px-4 pt-3">
-          <div className="p-3 bg-indigo-600 text-white rounded-xl text-xs flex justify-between items-center shadow-md">
-            <span>{statusMessage}</span>
-            <button onClick={() => setStatusMessage('')} className="text-indigo-200 hover:text-white font-bold ml-2">✕</button>
-          </div>
-        </div>
-      )}
-
-      <main className="max-w-5xl mx-auto p-4 space-y-6">
-        {/* 1. 내 프로필 요약 카드 */}
-        <div className="bg-white rounded-2xl p-4 shadow-sm border border-slate-200/80 flex flex-col sm:flex-row justify-between sm:items-center gap-3">
-          <div className="flex items-center gap-3">
-            <div className="w-11 h-11 bg-slate-100 rounded-2xl flex items-center justify-center text-xl shrink-0">
-              {profile.nationality === 'KR' ? '🇰🇷' : '🇯🇵'}
-            </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <h2 className="text-sm font-bold text-slate-900">{profile.name}</h2>
-                <span className="text-xs px-2 py-0.2 rounded-full bg-slate-100 font-medium text-slate-600">
-                  {profile.age}세
-                </span>
-                <span className={`text-[10px] px-2 py-0.2 rounded-full font-bold ${profile.gender === 'MALE' ? 'bg-indigo-100 text-indigo-700' : 'bg-pink-100 text-pink-700'}`}>
-                  {profile.gender === 'MALE' ? '남 (男)' : profile.gender === 'FEMALE' ? '여 (女)' : '-'}
-                </span>
-                <span className={`text-[10px] px-2 py-0.2 rounded-full font-bold ${profile.nationality === 'KR' ? 'bg-blue-100 text-blue-700' : 'bg-rose-100 text-rose-700'}`}>
-                  {profile.nationality === 'KR' ? '한국인' : '일본인'}
-                </span>
-              </div>
-              <p className="text-xs text-indigo-600 font-medium mt-0.5">📷 @{profile.instagram_id}</p>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-2 text-xs">
-            <div className="px-3 py-1.5 bg-slate-50 rounded-xl border border-slate-200/60">
-              <span className="text-slate-400 text-[10px] block">한국어</span>
-              <span className="font-bold text-slate-700">{profile.korean_level === 'HIGH' ? '상' : profile.korean_level === 'MID' ? '중' : '하'}</span>
-            </div>
-            <div className="px-3 py-1.5 bg-slate-50 rounded-xl border border-slate-200/60">
-              <span className="text-slate-400 text-[10px] block">일본어</span>
-              <span className="font-bold text-slate-700">{profile.japanese_level === 'HIGH' ? '상' : profile.japanese_level === 'MID' ? '중' : '하'}</span>
-            </div>
-            <div className="px-3 py-1.5 bg-slate-50 rounded-xl border border-slate-200/60">
-              <span className="text-slate-400 text-[10px] block">활동 상태</span>
-              <span className={`font-bold ${profile.is_blocked ? 'text-rose-600' : 'text-emerald-600'}`}>
-                {profile.is_blocked ? '차단됨' : '정상'}
-              </span>
-            </div>
-          </div>
-        </div>
-
-        {/* 2. 모임 스케줄 목록 (모든 회원 공통 열람 및 참가 신청) */}
-        <section className="space-y-3">
-          <div className="flex justify-between items-center">
-            <h3 className="text-sm font-bold text-slate-800 flex items-center gap-1.5">
-              <span>📅</span> 진행 예정 모임 스케줄
-            </h3>
-            <button onClick={fetchEvents} className="text-xs text-indigo-600 hover:underline">새로고침</button>
+      <main className="max-w-6xl mx-auto px-4 pt-6 space-y-8">
+        {/* 모임 목록 섹션 */}
+        <section>
+          <div className="flex justify-between items-center mb-4">
+            <h2 className="text-lg font-bold text-slate-900 flex items-center gap-2">
+              <span>📅</span> 예정된 교류회 일정
+            </h2>
+            <span className="text-xs text-slate-500">신청 후 자유롭게 참가가 가능합니다</span>
           </div>
 
           {events.length === 0 ? (
-            <div className="bg-white p-6 rounded-2xl text-center text-xs text-slate-400 border border-slate-200/80">
-              현재 예정된 모임이 없습니다.
+            <div className="bg-white p-10 rounded-2xl border text-center text-slate-400 text-sm">
+              현재 예정된 모임 일정이 없습니다.
             </div>
           ) : (
-            <div className="grid sm:grid-cols-2 gap-3">
-              {events.map((ev) => (
-                <div key={ev.id} className="bg-white p-4 rounded-2xl shadow-sm border border-slate-200/80 flex flex-col justify-between space-y-3">
-                  <div>
-                    <div className="flex justify-between items-start gap-2">
-                      <h4 className="font-bold text-sm text-slate-900 line-clamp-1">{ev.title}</h4>
-                      <span className="text-[10px] font-bold px-2 py-0.5 bg-slate-100 text-slate-600 rounded shrink-0">
-                        정원 {ev.max_participants}명
-                      </span>
-                    </div>
-                    <p className="text-xs text-slate-500 mt-1">📍 {ev.location}</p>
-                    <p className="text-xs text-slate-400 mt-0.5">🕒 {new Date(ev.event_date).toLocaleString('ko-KR', { month: 'long', day: 'numeric', weekday: 'short', hour: '2-digit', minute: '2-digit' })}</p>
-                  </div>
+            <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-5">
+              {events.map((ev) => {
+                const isApplied = myApplications.includes(ev.id)
+                const isFull = ev.max_count > 0 && ev.current_count >= ev.max_count
 
-                  <button
-                    onClick={() => handleOpenApplyModal(ev)}
-                    disabled={profile.is_blocked}
-                    className={`w-full py-2.5 rounded-xl font-bold text-xs shadow-sm transition active:scale-[0.99] ${
-                      profile.is_blocked
-                        ? 'bg-slate-200 text-slate-400 cursor-not-allowed'
-                        : 'bg-indigo-600 hover:bg-indigo-700 text-white'
-                    }`}
+                return (
+                  <div
+                    key={ev.id}
+                    className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm hover:shadow-md transition flex flex-col justify-between"
                   >
-                    {profile.is_blocked ? '참가 불가 (차단된 회원)' : '이 모임 참가 신청하기'}
-                  </button>
-                </div>
-              ))}
+                    <div>
+                      <div className="flex justify-between items-start mb-2">
+                        <span className="text-xs font-semibold px-2.5 py-0.5 bg-indigo-50 text-indigo-600 rounded-md border border-indigo-100">
+                          {ev.event_date}
+                        </span>
+                        <span
+                          className={`text-xs px-2 py-0.5 rounded-full font-bold ${
+                            isFull ? 'bg-rose-100 text-rose-600' : 'bg-emerald-100 text-emerald-700'
+                          }`}
+                        >
+                          {ev.max_count === 0 ? '정원 무제한' : `${ev.current_count} / ${ev.max_count}명`}
+                        </span>
+                      </div>
+                      <h3 className="font-bold text-base text-slate-900 mb-1">{ev.title}</h3>
+                      <p className="text-xs text-slate-500 flex items-center gap-1 mb-3">
+                        <span>📍</span> {ev.location}
+                      </p>
+                      {ev.description && (
+                        <p className="text-xs text-slate-600 bg-slate-50 p-2.5 rounded-xl border border-slate-100 line-clamp-2">
+                          {ev.description}
+                        </p>
+                      )}
+                    </div>
+
+                    <div className="pt-4 mt-3 border-t border-slate-100">
+                      {isApplied ? (
+                        <button
+                          disabled
+                          className="w-full py-2.5 bg-emerald-50 text-emerald-700 font-bold text-xs rounded-xl border border-emerald-200 cursor-default"
+                        >
+                          ✓ 참가 신청 완료
+                        </button>
+                      ) : isFull ? (
+                        <button
+                          disabled
+                          className="w-full py-2.5 bg-slate-100 text-slate-400 font-bold text-xs rounded-xl cursor-not-allowed"
+                        >
+                          정원 마감
+                        </button>
+                      ) : (
+                        <button
+                          onClick={() => setSelectedEvent(ev)}
+                          className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-xl shadow-sm transition active:scale-[0.99]"
+                        >
+                          참가 신청하기
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                )
+              })}
             </div>
           )}
         </section>
 
-        {/* 3-A. [👑 관리자 전용] 해당 모임별 참가 신청자 명부 표 (핵심 복구) */}
-        {isAdmin && (
-          <section className="bg-white rounded-2xl shadow-sm border border-indigo-200/90 overflow-hidden space-y-0">
-            <div className="p-4 border-b border-indigo-100 flex flex-col sm:flex-row justify-between sm:items-center gap-3 bg-indigo-50/40">
-              <div>
-                <h3 className="text-sm font-bold text-slate-900 flex items-center gap-1.5">
-                  <span>📋</span> 모임별 참가 신청 명부 (관리자 전용)
-                </h3>
-                <p className="text-[11px] text-slate-500 mt-0.5">
-                  조회할 모임을 선택하면 해당 모임의 신청자 명단이 아래 표에 즉시 표시됩니다.
-                </p>
-              </div>
-
-              {/* 모임 선택 셀렉트 박스 */}
-              <div className="flex items-center gap-2 text-xs">
-                <span className="text-slate-600 font-semibold">모임 선택:</span>
-                <select
-                  value={selectedEventId}
-                  onChange={(e) => setSelectedEventId(e.target.value)}
-                  className="p-2 border border-indigo-200 rounded-xl bg-white font-bold text-indigo-900 shadow-xs focus:outline-indigo-500"
-                >
-                  <option value="ALL">전체 모임 신청자 보기 ({eventApplications.length}명)</option>
-                  {events.map((ev) => (
-                    <option key={ev.id} value={ev.id}>
-                      {ev.title}
-                    </option>
-                  ))}
-                </select>
-                <button
-                  onClick={fetchEventApplications}
-                  className="p-2 px-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-semibold"
-                >
-                  새로고침
+        {/* 참가 신청 모달 */}
+        {selectedEvent && (
+          <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+            <div className="bg-white w-full max-w-md rounded-2xl p-6 shadow-xl space-y-4">
+              <div className="flex justify-between items-center border-b pb-3">
+                <h3 className="font-bold text-base text-slate-900">모임 참가 신청</h3>
+                <button onClick={() => setSelectedEvent(null)} className="text-slate-400 hover:text-slate-600 text-lg">
+                  ✕
                 </button>
               </div>
-            </div>
 
-            {/* 모임 참가 신청자 가로 표 (신청일시 제외 / 성별 포함) */}
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs whitespace-nowrap">
-                <thead className="bg-slate-50 border-b border-slate-100 text-slate-500 font-semibold">
-                  <tr>
-                    <th className="py-3 px-4">번호</th>
-                    <th className="py-3 px-4">이름 (나이)</th>
-                    <th className="py-3 px-4 text-center">성별 (性別)</th>
-                    <th className="py-3 px-4 text-center">국적</th>
-                    <th className="py-3 px-4">인스타그램 ID</th>
-                    <th className="py-3 px-4">신청 모임 타이틀</th>
-                    <th className="py-3 px-4 text-center">어학 실력 (한/일)</th>
-                    <th className="py-3 px-4 text-center">참가 이력</th>
-                    <th className="py-3 px-4 text-center">계정 제어</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {currentEventApps.length === 0 ? (
-                    <tr>
-                      <td colSpan={9} className="py-12 text-center text-slate-400">
-                        이 모임에 신청한 회원이 아직 없습니다.
-                      </td>
-                    </tr>
-                  ) : (
-                    currentEventApps.map((app, index) => {
-                      const member = app.profiles || {}
-                      const isBlocked = member.is_blocked
-
-                      return (
-                        <tr
-                          key={app.id}
-                          className={`hover:bg-slate-50/80 transition ${isBlocked ? 'bg-rose-50/40 text-slate-400' : ''}`}
-                        >
-                          {/* 번호 */}
-                          <td className="py-3 px-4 font-mono text-slate-400">{index + 1}</td>
-
-                          {/* 이름 (나이) */}
-                          <td className="py-3 px-4">
-                            <span className="font-bold text-slate-900">{member.name || '미등록'}</span>
-                            <span className="text-slate-400 ml-1">({member.age ? `${member.age}세` : '-'})</span>
-                            {member.role === 'ADMIN' && (
-                              <span className="ml-1.5 text-[9px] bg-amber-100 text-amber-800 px-1 rounded font-bold">운영자</span>
-                            )}
-                          </td>
-
-                          {/* 성별 (남 男 / 여 女) */}
-                          <td className="py-3 px-4 text-center">
-                            <span
-                              className={`px-2 py-0.5 rounded-md font-bold text-[11px] ${
-                                member.gender === 'MALE'
-                                  ? 'bg-indigo-50 text-indigo-700 border border-indigo-200'
-                                  : member.gender === 'FEMALE'
-                                  ? 'bg-pink-50 text-pink-700 border border-pink-200'
-                                  : 'text-slate-400'
-                              }`}
-                            >
-                              {member.gender === 'MALE' ? '남 (男)' : member.gender === 'FEMALE' ? '여 (女)' : '-'}
-                            </span>
-                          </td>
-
-                          {/* 국적 */}
-                          <td className="py-3 px-4 text-center">
-                            <span
-                              className={`px-2 py-0.5 rounded-md font-bold text-[11px] ${
-                                member.nationality === 'KR'
-                                  ? 'bg-blue-100 text-blue-700'
-                                  : member.nationality === 'JP'
-                                  ? 'bg-rose-100 text-rose-700'
-                                  : 'bg-slate-100 text-slate-600'
-                              }`}
-                            >
-                              {member.nationality === 'KR' ? '🇰🇷 한국' : member.nationality === 'JP' ? '🇯🇵 일본' : '-'}
-                            </span>
-                          </td>
-
-                          {/* 인스타그램 ID */}
-                          <td className="py-3 px-4">
-                            {member.instagram_id ? (
-                              <a
-                                href={`https://instagram.com/${member.instagram_id}`}
-                                target="_blank"
-                                rel="noreferrer"
-                                className="text-indigo-600 font-semibold hover:underline flex items-center gap-1"
-                              >
-                                @{member.instagram_id}
-                                <span className="text-[10px] text-slate-400">↗</span>
-                              </a>
-                            ) : (
-                              <span className="text-slate-300">-</span>
-                            )}
-                          </td>
-
-                          {/* 신청 모임 */}
-                          <td className="py-3 px-4 font-medium text-slate-700 max-w-[200px] truncate">
-                            {app.events?.title || '모임 정보 없음'}
-                          </td>
-
-                          {/* 어학 실력 */}
-                          <td className="py-3 px-4 text-center font-mono">
-                            <span className="px-1.5 py-0.5 bg-slate-100 rounded text-slate-700 font-semibold">
-                              한:{app.korean_level === 'HIGH' ? '상' : app.korean_level === 'MID' ? '중' : '하'}
-                            </span>
-                            <span className="mx-1 text-slate-300">/</span>
-                            <span className="px-1.5 py-0.5 bg-slate-100 rounded text-slate-700 font-semibold">
-                              일:{app.japanese_level === 'HIGH' ? '상' : app.japanese_level === 'MID' ? '중' : '하'}
-                            </span>
-                          </td>
-
-                          {/* 참가 이력 */}
-                          <td className="py-3 px-4 text-center">
-                            {app.is_first_time ? (
-                              <span className="px-2 py-0.5 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-full font-bold text-[10px]">
-                                ✨ 첫 참가
-                              </span>
-                            ) : (
-                              <span className="px-2 py-0.5 bg-purple-50 text-purple-700 border border-purple-200 rounded-full font-bold text-[10px]">
-                                {app.attendance_count}회차
-                              </span>
-                            )}
-                          </td>
-
-                          {/* 관리자: 차단/해제 제어 */}
-                          <td className="py-3 px-4 text-center">
-                            {member.id !== profile.id ? (
-                              <button
-                                onClick={() => handleToggleBlockUser(member.id, isBlocked)}
-                                className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition ${
-                                  isBlocked
-                                    ? 'bg-slate-200 text-slate-700 hover:bg-slate-300'
-                                    : 'bg-rose-50 text-rose-600 border border-rose-200 hover:bg-rose-100'
-                                }`}
-                              >
-                                {isBlocked ? '차단해제' : '차단'}
-                              </button>
-                            ) : (
-                              <span className="text-[10px] text-slate-400">본인</span>
-                            )}
-                          </td>
-                        </tr>
-                      )
-                    })
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </section>
-        )}
-
-        {/* 3-B. [일반 회원 전용] 나의 참가 신청 내역 (타인 개인정보 차단) */}
-        {!isAdmin && (
-          <section className="bg-white rounded-2xl p-4 shadow-sm border border-slate-200/80 space-y-3">
-            <div className="flex justify-between items-center">
-              <h3 className="text-sm font-bold text-slate-800 flex items-center gap-1.5">
-                <span>📋</span> 나의 교류회 참가 신청 내역
-              </h3>
-              <span className="text-xs text-indigo-600 font-semibold">총 {myApplications.length}건</span>
-            </div>
-
-            {myApplications.length === 0 ? (
-              <div className="text-center py-8 text-xs text-slate-400">
-                아직 신청한 모임이 없습니다. 위의 스케줄에서 원하는 모임에 참가 신청해 보세요!
-              </div>
-            ) : (
-              <div className="space-y-2">
-                {myApplications.map((app) => (
-                  <div key={app.id} className="p-3 bg-slate-50 rounded-xl border border-slate-100 text-xs flex justify-between items-center">
-                    <div>
-                      <h4 className="font-bold text-slate-900">{app.events?.title || '모임 정보'}</h4>
-                      <p className="text-[11px] text-slate-500 mt-0.5">
-                        📍 {app.events?.location} • {app.is_first_time ? '✨ 첫 참가' : `누적 ${app.attendance_count}회차`}
-                      </p>
-                    </div>
-                    <span className="px-2.5 py-1 bg-emerald-100 text-emerald-700 rounded-full font-bold text-[10px]">
-                      신청 완료
-                    </span>
-                  </div>
-                ))}
-              </div>
-            )}
-          </section>
-        )}
-
-        {/* 4. [👑 관리자 전용] 가입 회원 전체 관리 & 새 모임 생성 */}
-        {isAdmin && (
-          <div className="space-y-4 pt-2 border-t-2 border-dashed border-amber-200">
-            {/* 전체 가입 회원 리스트 (모임 신청 안 한 사람도 확인 및 차단 가능) */}
-            <section className="bg-white rounded-2xl p-4 shadow-sm border border-amber-200/80 space-y-3">
-              <div className="flex justify-between items-center">
-                <h3 className="text-sm font-bold text-amber-900 flex items-center gap-1.5">
-                  <span>🛡️</span> 전체 가입 회원 계정 목록 ({allMembers.length}명)
-                </h3>
-                <button onClick={fetchAllMembersList} className="text-xs text-amber-700 hover:underline">새로고침</button>
+              <div className="bg-indigo-50 p-3 rounded-xl border border-indigo-100 text-xs text-indigo-900">
+                <p className="font-bold">{selectedEvent.title}</p>
+                <p className="text-indigo-600 mt-0.5">일시: {selectedEvent.event_date} | 장소: {selectedEvent.location}</p>
               </div>
 
-              <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
-                {allMembers.map((m) => (
-                  <div key={m.id} className="p-2.5 rounded-xl border border-slate-100 bg-slate-50 text-xs flex justify-between items-center">
-                    <div>
-                      <div className="flex items-center gap-1.5">
-                        <span className="font-bold text-slate-900">{m.name}</span>
-                        <span className="text-[10px] text-slate-400">({m.age}세)</span>
-                        <span className="text-[10px] text-indigo-600 font-semibold">@{m.instagram_id}</span>
-                        <span className={`text-[10px] px-1.5 py-0.2 rounded font-bold ${m.gender === 'MALE' ? 'bg-indigo-100 text-indigo-700' : 'bg-pink-100 text-pink-700'}`}>
-                          {m.gender === 'MALE' ? '남(男)' : '여(女)'}
-                        </span>
-                        <span className={`text-[10px] px-1.5 py-0.2 rounded font-bold ${m.nationality === 'KR' ? 'bg-blue-100 text-blue-700' : 'bg-rose-100 text-rose-700'}`}>
-                          {m.nationality}
-                        </span>
-                        {m.role === 'ADMIN' && (
-                          <span className="text-[9px] bg-amber-100 text-amber-800 px-1 rounded font-bold">운영자</span>
-                        )}
-                      </div>
-                      <p className="text-[10px] text-slate-400 mt-0.5">
-                        한({m.korean_level})/일({m.japanese_level})
-                      </p>
-                    </div>
-
-                    {m.id !== profile.id && (
-                      <button
-                        onClick={() => handleToggleBlockUser(m.id, m.is_blocked)}
-                        className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition ${
-                          m.is_blocked
-                            ? 'bg-slate-200 text-slate-700 hover:bg-slate-300'
-                            : 'bg-rose-50 text-rose-600 border border-rose-200 hover:bg-rose-100'
-                        }`}
-                      >
-                        {m.is_blocked ? '차단해제' : '차단'}
-                      </button>
-                    )}
-                  </div>
-                ))}
-              </div>
-            </section>
-
-            {/* 새 모임 스케줄 생성 */}
-            <section className="bg-white rounded-2xl p-4 shadow-sm border border-slate-200/80 space-y-3">
-              <h3 className="text-sm font-bold text-slate-800 flex items-center gap-1.5">
-                <span>🛠️</span> 새 모임 스케줄 생성 (관리자)
-              </h3>
-
-              <form onSubmit={handleCreateEvent} className="space-y-2.5 text-xs">
+              <form onSubmit={handleApply} className="space-y-3 text-xs">
                 <div>
-                  <label className="block text-slate-600 mb-1 font-semibold">모임 타이틀</label>
+                  <label className="block font-semibold text-slate-700 mb-1">이름</label>
                   <input
                     type="text"
-                    placeholder="예: 11월 홍대 한일 회화 모임"
-                    value={newTitle}
-                    onChange={(e) => setNewTitle(e.target.value)}
-                    className="w-full p-2 border border-slate-200 rounded-xl bg-slate-50 focus:bg-white"
                     required
+                    value={applyForm.name}
+                    onChange={(e) => setApplyForm({ ...applyForm, name: e.target.value })}
+                    className="w-full p-2 border rounded-lg"
+                    placeholder="실명 또는 닉네임"
                   />
                 </div>
 
                 <div className="grid grid-cols-2 gap-2">
                   <div>
-                    <label className="block text-slate-600 mb-1 font-semibold">일시</label>
+                    <label className="block font-semibold text-slate-700 mb-1">나이</label>
                     <input
-                      type="datetime-local"
-                      value={newDate}
-                      onChange={(e) => setNewDate(e.target.value)}
-                      className="w-full p-2 border border-slate-200 rounded-xl bg-slate-50 focus:bg-white"
+                      type="number"
                       required
+                      value={applyForm.age}
+                      onChange={(e) => setApplyForm({ ...applyForm, age: e.target.value })}
+                      className="w-full p-2 border rounded-lg"
+                      placeholder="예: 25"
                     />
                   </div>
                   <div>
-                    <label className="block text-slate-600 mb-1 font-semibold">최대 인원</label>
+                    <label className="block font-semibold text-slate-700 mb-1">성별</label>
+                    <select
+                      value={applyForm.gender}
+                      onChange={(e) => setApplyForm({ ...applyForm, gender: e.target.value })}
+                      className="w-full p-2 border rounded-lg bg-white"
+                    >
+                      <option value="남">남 (男)</option>
+                      <option value="여">여 (女)</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="block font-semibold text-slate-700 mb-1">국적</label>
+                    <select
+                      value={applyForm.nationality}
+                      onChange={(e) => setApplyForm({ ...applyForm, nationality: e.target.value })}
+                      className="w-full p-2 border rounded-lg bg-white"
+                    >
+                      <option value="한국">한국 (韓国)</option>
+                      <option value="일본">일본 (日本)</option>
+                      <option value="기타">기타 (Others)</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block font-semibold text-slate-700 mb-1">어학 실력</label>
+                    <select
+                      value={applyForm.language_level}
+                      onChange={(e) => setApplyForm({ ...applyForm, language_level: e.target.value })}
+                      className="w-full p-2 border rounded-lg bg-white"
+                    >
+                      <option value="초급">초급 (간단한 인사)</option>
+                      <option value="중급">중급 (일상 회화)</option>
+                      <option value="고급">고급 (원활한 대화)</option>
+                      <option value="원어민">모국어 (원어민)</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block font-semibold text-slate-700 mb-1">인스타그램 아이디</label>
+                  <input
+                    type="text"
+                    required
+                    value={applyForm.instagram_id}
+                    onChange={(e) => setApplyForm({ ...applyForm, instagram_id: e.target.value })}
+                    className="w-full p-2 border rounded-lg"
+                    placeholder="인스타그램 ID (@ 제외)"
+                  />
+                </div>
+
+                <div className="flex items-center gap-2 pt-1">
+                  <input
+                    type="checkbox"
+                    id="first-check"
+                    checked={applyForm.is_first}
+                    onChange={(e) => setApplyForm({ ...applyForm, is_first: e.target.checked })}
+                    className="rounded text-indigo-600"
+                  />
+                  <label htmlFor="first-check" className="text-slate-600 select-none">
+                    교류회 첫 참가입니다
+                  </label>
+                </div>
+
+                <div className="flex gap-2 pt-3">
+                  <button
+                    type="button"
+                    onClick={() => setSelectedEvent(null)}
+                    className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold rounded-xl"
+                  >
+                    취소
+                  </button>
+                  <button
+                    type="submit"
+                    className="flex-1 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl shadow-sm"
+                  >
+                    신청 등록
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+
+        {/* 관리자(ADMIN) 전용 섹션: 모임 개설 & 전체 신청자 명부 */}
+        {isAdmin && (
+          <div className="space-y-8 pt-6 border-t border-slate-200">
+            {/* 1. 관리자: 새 모임 생성 */}
+            <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
+              <h3 className="font-bold text-base text-slate-900 mb-4 flex items-center gap-2">
+                <span>➕</span> 새 모임 스케줄 생성 (관리자)
+              </h3>
+              <form onSubmit={handleCreateEvent} className="space-y-4 text-xs">
+                <div className="grid md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block font-semibold text-slate-700 mb-1">모임명</label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="예: 11월 홍대 한일 교류회"
+                      value={newEvent.title}
+                      onChange={(e) => setNewEvent({ ...newEvent, title: e.target.value })}
+                      className="w-full p-2.5 border rounded-xl"
+                    />
+                  </div>
+                  <div>
+                    <label className="block font-semibold text-slate-700 mb-1">일시</label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="예: 2026-11-15 (일) 18:00"
+                      value={newEvent.event_date}
+                      onChange={(e) => setNewEvent({ ...newEvent, event_date: e.target.value })}
+                      className="w-full p-2.5 border rounded-xl"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block font-semibold text-slate-700 mb-1">장소</label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="예: 홍대입구역 인근 카페 / 신오쿠보 라운지"
+                      value={newEvent.location}
+                      onChange={(e) => setNewEvent({ ...newEvent, location: e.target.value })}
+                      className="w-full p-2.5 border rounded-xl"
+                    />
+                  </div>
+                  <div>
+                    <label className="block font-semibold text-slate-700 mb-1">모집 정원 (명)</label>
                     <input
                       type="number"
-                      value={newMax}
-                      onChange={(e) => setNewMax(Number(e.target.value))}
-                      className="w-full p-2 border border-slate-200 rounded-xl bg-slate-50 focus:bg-white"
+                      required
+                      placeholder="20"
+                      value={newEvent.max_count}
+                      onChange={(e) => setNewEvent({ ...newEvent, max_count: Number(e.target.value) })}
+                      className="w-full p-2.5 border rounded-xl"
                     />
                   </div>
                 </div>
 
                 <div>
-                  <label className="block text-slate-600 mb-1 font-semibold">장소</label>
-                  <input
-                    type="text"
-                    placeholder="예: 마포구 서교동 카페 린"
-                    value={newLocation}
-                    onChange={(e) => setNewLocation(e.target.value)}
-                    className="w-full p-2 border border-slate-200 rounded-xl bg-slate-50 focus:bg-white"
-                    required
+                  <label className="block font-semibold text-slate-700 mb-1">상세 안내 (선택)</label>
+                  <textarea
+                    rows={2}
+                    placeholder="참가비, 진행 방식 등 안내사항을 적어주세요."
+                    value={newEvent.description}
+                    onChange={(e) => setNewEvent({ ...newEvent, description: e.target.value })}
+                    className="w-full p-2.5 border rounded-xl"
                   />
                 </div>
 
                 <button
                   type="submit"
-                  className="w-full py-2.5 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-xl transition shadow-sm"
+                  className="px-6 py-2.5 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-xl transition shadow-sm"
                 >
-                  모임 스케줄 등록
+                  모임 일정 게시하기
                 </button>
               </form>
-            </section>
+            </div>
+
+            {/* 2. 관리자: 참가자 통합 명부 표 (인스타 외부 링크 복구 완료) */}
+            <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
+              <div className="flex justify-between items-center mb-4">
+                <h3 className="font-bold text-base text-slate-900 flex items-center gap-2">
+                  <span>📋</span> 모임별 참가 신청 명부 (관리자 전용)
+                </h3>
+                <span className="text-xs text-slate-500">총 {applications.length}명 신청 완료</span>
+              </div>
+
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs border-collapse">
+                  <thead>
+                    <tr className="bg-slate-50 text-slate-600 border-b">
+                      <th className="p-3">모임명</th>
+                      <th className="p-3">이름</th>
+                      <th className="p-3">나이</th>
+                      <th className="p-3">성별</th>
+                      <th className="p-3">국적</th>
+                      <th className="p-3">인스타그램 (클릭시 이동)</th>
+                      <th className="p-3">어학 실력</th>
+                      <th className="p-3">첫 참가</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {applications.length === 0 ? (
+                      <tr>
+                        <td colSpan={8} className="p-8 text-center text-slate-400">
+                          아직 접수된 참가 신청이 없습니다.
+                        </td>
+                      </tr>
+                    ) : (
+                      applications.map((app) => {
+                        const matchedEvent = events.find((e) => e.id === app.event_id)
+                        const cleanInsta = app.instagram_id.replace(/^@/, '').trim()
+
+                        return (
+                          <tr key={app.id} className="hover:bg-slate-50/80 transition">
+                            <td className="p-3 font-semibold text-slate-800">{matchedEvent?.title || '모임'}</td>
+                            <td className="p-3 font-medium text-slate-900">{app.name}</td>
+                            <td className="p-3 text-slate-600">{app.age}세</td>
+                            <td className="p-3">
+                              <span
+                                className={`px-2 py-0.5 rounded font-semibold text-[11px] ${
+                                  app.gender === '남' ? 'bg-blue-50 text-blue-600' : 'bg-rose-50 text-rose-600'
+                                }`}
+                              >
+                                {app.gender === '남' ? '남 男' : '여 女'}
+                              </span>
+                            </td>
+                            <td className="p-3 text-slate-700">{app.nationality}</td>
+                            
+                            {/* ★ 인스타그램 프로필 클릭 시 새 창으로 바로 이동하는 링크 태그 복구 완료 ★ */}
+                            <td className="p-3">
+                              <a
+                                href={`https://instagram.com/${cleanInsta}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="text-pink-600 hover:text-pink-700 font-medium hover:underline inline-flex items-center gap-1"
+                              >
+                                <span>@{cleanInsta}</span>
+                                <svg className="w-3 h-3 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                                </svg>
+                              </a>
+                            </td>
+
+                            <td className="p-3 text-slate-600">{app.language_level}</td>
+                            <td className="p-3">
+                              {app.is_first ? (
+                                <span className="px-2 py-0.5 bg-amber-50 text-amber-600 rounded text-[11px] font-semibold">
+                                  첫참가
+                                </span>
+                              ) : (
+                                <span className="text-slate-400">재참가</span>
+                              )}
+                            </td>
+                          </tr>
+                        )
+                      })
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
           </div>
         )}
       </main>
-
-      {/* 참가 신청 입력 모달 */}
-      {selectedEvent && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl max-w-sm w-full p-5 shadow-2xl space-y-4">
-            <div>
-              <h3 className="font-bold text-base text-slate-900">{selectedEvent.title}</h3>
-              <p className="text-xs text-slate-500 mt-1">현재 어학 실력과 참가 횟수를 확인해 주세요.</p>
-            </div>
-
-            <form onSubmit={handleSubmitApplication} className="space-y-3 text-xs">
-              <div>
-                <label className="block text-slate-600 font-semibold mb-1">현재 한국어 실력</label>
-                <select
-                  value={applyKoreanLevel}
-                  onChange={(e) => setApplyKoreanLevel(e.target.value)}
-                  className="w-full p-2 border border-slate-200 rounded-xl bg-slate-50"
-                >
-                  <option value="HIGH">상 (유창함)</option>
-                  <option value="MID">중 (회화가능)</option>
-                  <option value="LOW">하 (기초)</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-slate-600 font-semibold mb-1">현재 일본어 실력</label>
-                <select
-                  value={applyJapaneseLevel}
-                  onChange={(e) => setApplyJapaneseLevel(e.target.value)}
-                  className="w-full p-2 border border-slate-200 rounded-xl bg-slate-50"
-                >
-                  <option value="HIGH">상 (유창함)</option>
-                  <option value="MID">중 (회화가능)</option>
-                  <option value="LOW">하 (기초)</option>
-                </select>
-              </div>
-
-              <div className="pt-1">
-                <label className="block text-slate-600 font-semibold mb-1">교류회 참가 이력</label>
-                <div className="grid grid-cols-2 gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setIsFirstTime(true)}
-                    className={`py-2 rounded-xl font-bold border transition ${
-                      isFirstTime ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-slate-50 text-slate-600 border-slate-200'
-                    }`}
-                  >
-                    처음 참가예요 ✨
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setIsFirstTime(false)}
-                    className={`py-2 rounded-xl font-bold border transition ${
-                      !isFirstTime ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-slate-50 text-slate-600 border-slate-200'
-                    }`}
-                  >
-                    이전에 와봤어요
-                  </button>
-                </div>
-              </div>
-
-              {!isFirstTime && (
-                <div>
-                  <label className="block text-slate-600 font-semibold mb-1">누적 참가 횟수 (회)</label>
-                  <input
-                    type="number"
-                    min="2"
-                    value={attendanceCount}
-                    onChange={(e) => setAttendanceCount(Number(e.target.value))}
-                    className="w-full p-2 border border-slate-200 rounded-xl bg-slate-50"
-                    placeholder="예: 3"
-                    required
-                  />
-                </div>
-              )}
-
-              <div className="flex gap-2 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setSelectedEvent(null)}
-                  className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold rounded-xl"
-                >
-                  취소
-                </button>
-                <button
-                  type="submit"
-                  className="flex-1 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl shadow-sm"
-                >
-                  신청 등록
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
     </div>
   )
 }
