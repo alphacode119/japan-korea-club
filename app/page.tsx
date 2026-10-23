@@ -62,7 +62,7 @@ export default function ClubMainDashboard() {
     return g === 'male' || g === '남' || g === '남자' || g === 'm'
   }
 
-  // 어학 등급(상/중/하 등)을 고급/중급/초급/원어민으로 매핑 변환
+  // 어학 등급 매핑 함수
   const normalizeLevel = (lvl?: string, defaultVal: string = '중급') => {
     if (!lvl) return defaultVal
     const clean = lvl.trim()
@@ -99,7 +99,7 @@ export default function ClubMainDashboard() {
     instagram_id: '',
     korean_level: '고급',
     japanese_level: '중급',
-    participation_type: 'first' as 'first' | 'repeat', // 'first' 또는 'repeat' 둘 중 하나 선택
+    participation_type: 'first' as 'first' | 'repeat',
     participation_count: 2,
   })
 
@@ -193,7 +193,7 @@ export default function ClubMainDashboard() {
     }
   }
 
-  // 참가 신청 모달 열기 핸들러
+  // 참가 신청 모달 열기
   const openApplyModal = (ev: EventItem) => {
     if (userProfile) {
       setApplyForm((prev) => ({
@@ -239,7 +239,6 @@ export default function ClubMainDashboard() {
     if (error) {
       alert('신청 실패: ' + error.message)
     } else {
-      // 모임 인원수 +1
       await supabase
         .from('events')
         .update({ current_count: (selectedEvent.current_count || 0) + 1 })
@@ -251,14 +250,13 @@ export default function ClubMainDashboard() {
     }
   }
 
-  // 모임 신청 취소 기능
+  // 참가 신청 취소 기능 (개인용)
   const handleCancelApplication = async (eventId: string) => {
     if (!confirm('정말로 모임 참가 신청을 취소하시겠습니까?')) return
 
     const applicationId = myApplications[eventId]
     if (!applicationId) return
 
-    // 1. 신청 내역 삭제
     const { error } = await supabase
       .from('event_applications')
       .delete()
@@ -269,7 +267,6 @@ export default function ClubMainDashboard() {
       return
     }
 
-    // 2. 모임 인원수 -1 차감
     const targetEvent = events.find((e) => e.id === eventId)
     if (targetEvent) {
       const updatedCount = Math.max((targetEvent.current_count || 1) - 1, 0)
@@ -281,6 +278,36 @@ export default function ClubMainDashboard() {
 
     alert('모임 참가 신청이 취소되었습니다.')
     loadAllData(currentUser.id, userProfile?.role === 'ADMIN')
+  }
+
+  // ★ 모임 자체 취소/삭제 기능 (관리자 전용) ★
+  const handleDeleteEvent = async (event: EventItem) => {
+    const confirmMessage = `[경고] "${event.title}" 모임을 완전히 취소(삭제)하시겠습니까?\n\n※ 등록된 모임 정보와 참가 신청자 내역이 모두 함께 삭제됩니다.`
+    if (!confirm(confirmMessage)) return
+
+    try {
+      // 1. 해당 모임에 신청된 내역 먼저 삭제
+      await supabase
+        .from('event_applications')
+        .delete()
+        .eq('event_id', event.id)
+
+      // 2. 모임 자체 삭제
+      const { error } = await supabase
+        .from('events')
+        .delete()
+        .eq('id', event.id)
+
+      if (error) {
+        alert('모임 삭제 실패: ' + error.message)
+      } else {
+        alert(`"${event.title}" 모임이 정상적으로 취소 및 삭제되었습니다.`)
+        loadAllData(currentUser.id, true)
+      }
+    } catch (err: any) {
+      console.error(err)
+      alert('오류가 발생했습니다: ' + err.message)
+    }
   }
 
   // 모임 생성 (관리자용)
@@ -389,21 +416,36 @@ export default function ClubMainDashboard() {
                 return (
                   <div
                     key={ev.id}
-                    className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm hover:shadow-md transition flex flex-col justify-between"
+                    className="relative bg-white rounded-2xl border border-slate-200 p-5 shadow-sm hover:shadow-md transition flex flex-col justify-between"
                   >
                     <div>
+                      {/* 카드 상단: 날짜 + 정원 + (관리자용 모임 자체 삭제 버튼) */}
                       <div className="flex justify-between items-start mb-2">
                         <span className="text-xs font-semibold px-2.5 py-0.5 bg-indigo-50 text-indigo-600 rounded-md border border-indigo-100">
                           {formatDisplayDate(ev.event_date)}
                         </span>
-                        <span
-                          className={`text-xs px-2 py-0.5 rounded-full font-bold ${
-                            isFull ? 'bg-rose-100 text-rose-600' : 'bg-emerald-100 text-emerald-700'
-                          }`}
-                        >
-                          {ev.max_count === 0 ? '정원 무제한' : `${ev.current_count} / ${ev.max_count}명`}
-                        </span>
+                        <div className="flex items-center gap-2">
+                          <span
+                            className={`text-xs px-2 py-0.5 rounded-full font-bold ${
+                              isFull ? 'bg-rose-100 text-rose-600' : 'bg-emerald-100 text-emerald-700'
+                            }`}
+                          >
+                            {ev.max_count === 0 ? '정원 무제한' : `${ev.current_count} / ${ev.max_count}명`}
+                          </span>
+
+                          {/* ★ 관리자 전용: 모임 자체 취소/삭제 버튼 ★ */}
+                          {isAdmin && (
+                            <button
+                              onClick={() => handleDeleteEvent(ev)}
+                              title="모임 일정 자체 삭제"
+                              className="text-slate-400 hover:text-rose-600 hover:bg-rose-50 p-1 rounded-md transition text-xs flex items-center"
+                            >
+                              🗑️
+                            </button>
+                          )}
+                        </div>
                       </div>
+
                       <h3 className="font-bold text-base text-slate-900 mb-1">{ev.title}</h3>
                       <p className="text-xs text-slate-500 flex items-center gap-1 mb-3">
                         <span>📍</span> {ev.location}
@@ -473,7 +515,7 @@ export default function ClubMainDashboard() {
               </div>
 
               <form onSubmit={handleApply} className="space-y-3 text-xs">
-                {/* 기본 정보 (고정 출력) */}
+                {/* 기본 정보 */}
                 <div>
                   <label className="block font-semibold text-slate-700 mb-1">이름</label>
                   <input
@@ -527,7 +569,7 @@ export default function ClubMainDashboard() {
                   </div>
                 </div>
 
-                {/* 어학 실력 선택 (고급, 중급, 초급, 원어민) */}
+                {/* 어학 실력 선택 */}
                 <div className="grid grid-cols-2 gap-2 pt-1 border-t border-slate-100">
                   <div>
                     <label className="block font-semibold text-slate-700 mb-1">
@@ -565,7 +607,6 @@ export default function ClubMainDashboard() {
                 <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 space-y-2 mt-2">
                   <span className="block font-semibold text-slate-700 mb-1">참가 이력 구분</span>
                   <div className="grid grid-cols-2 gap-3 items-center">
-                    {/* 옵션 1: 첫 참가 */}
                     <label
                       className={`flex items-center gap-2 p-2 rounded-lg border cursor-pointer transition ${
                         applyForm.participation_type === 'first'
@@ -584,7 +625,6 @@ export default function ClubMainDashboard() {
                       <span>🌱 첫 참가</span>
                     </label>
 
-                    {/* 옵션 2: N회차 (재참가) */}
                     <label
                       className={`flex items-center gap-2 p-2 rounded-lg border cursor-pointer transition ${
                         applyForm.participation_type === 'repeat'
@@ -604,7 +644,6 @@ export default function ClubMainDashboard() {
                     </label>
                   </div>
 
-                  {/* N회차 선택 시 나타나는 회차 선택/입력칸 */}
                   {applyForm.participation_type === 'repeat' && (
                     <div className="pt-2 flex items-center justify-between bg-white p-2.5 rounded-lg border border-indigo-100">
                       <span className="text-slate-700 font-medium">이번 참가 회차:</span>
