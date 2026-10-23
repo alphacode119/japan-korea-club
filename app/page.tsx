@@ -23,8 +23,10 @@ interface ApplicationItem {
   gender: string
   nationality: string
   instagram_id: string
-  language_level: string
+  korean_level?: string
+  japanese_level?: string
   is_first: boolean
+  participation_count?: number
   created_at: string
 }
 
@@ -35,6 +37,8 @@ interface MemberProfile {
   gender?: string
   nationality?: string
   instagram_id?: string
+  korean_level?: string
+  japanese_level?: string
   role?: string
   created_at?: string
 }
@@ -58,8 +62,8 @@ export default function ClubMainDashboard() {
     return g === 'male' || g === '남' || g === '남자' || g === 'm'
   }
 
-  // datetime-local 값(YYYY-MM-DDTHH:mm)을 보기 좋은 형태(YYYY-MM-DD (요일) HH:mm)로 변환
-  const formatDateTimeString = (rawDate: string) => {
+  // 화면 표시용 날짜 변환 함수
+  const formatDisplayDate = (rawDate: string) => {
     if (!rawDate) return ''
     const dt = new Date(rawDate)
     if (isNaN(dt.getTime())) return rawDate
@@ -75,18 +79,20 @@ export default function ClubMainDashboard() {
     return `${year}-${month}-${day} (${dayOfWeek}) ${hours}:${minutes}`
   }
 
-  // 신청 폼 상태
+  // 신청 폼 상태 (한국어/일본어 실력 및 참가횟수 분리)
   const [applyForm, setApplyForm] = useState({
     name: '',
     age: '',
     gender: '남',
     nationality: '한국',
     instagram_id: '',
-    language_level: '중급',
+    korean_level: '중급',
+    japanese_level: '중급',
     is_first: true,
+    participation_count: 2, // 재참가 기본값
   })
 
-  // 신규 모임 생성 폼 (관리자용) - event_date에 datetime-local 값 바인딩
+  // 신규 모임 생성 폼 (관리자용)
   const [newEvent, setNewEvent] = useState({
     title: '',
     event_date: '',
@@ -120,8 +126,12 @@ export default function ClubMainDashboard() {
         setApplyForm((prev) => ({
           ...prev,
           name: profile.name || '',
+          age: profile.age ? String(profile.age) : prev.age,
           gender: isMale(profile.gender) ? '남' : '여',
+          nationality: profile.nationality || '한국',
           instagram_id: profile.instagram_id ? profile.instagram_id.replace(/^@/, '').trim() : '',
+          korean_level: profile.korean_level || '중급',
+          japanese_level: profile.japanese_level || '중급',
         }))
       }
 
@@ -172,6 +182,25 @@ export default function ClubMainDashboard() {
     }
   }
 
+  // 참가 신청 모달 열기 핸들러 (회원 기본정보 동기화 & 실력 선택창 초기화)
+  const openApplyModal = (ev: EventItem) => {
+    if (userProfile) {
+      setApplyForm((prev) => ({
+        ...prev,
+        name: userProfile.name || '',
+        age: userProfile.age ? String(userProfile.age) : prev.age,
+        gender: isMale(userProfile.gender) ? '남' : '여',
+        nationality: userProfile.nationality || '한국',
+        instagram_id: userProfile.instagram_id ? userProfile.instagram_id.replace(/^@/, '').trim() : '',
+        korean_level: userProfile.korean_level || prev.korean_level || '중급',
+        japanese_level: userProfile.japanese_level || prev.japanese_level || '중급',
+        is_first: true,
+        participation_count: 2,
+      }))
+    }
+    setSelectedEvent(ev)
+  }
+
   // 모임 신청 처리
   const handleApply = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -188,8 +217,10 @@ export default function ClubMainDashboard() {
         gender: applyForm.gender,
         nationality: applyForm.nationality,
         instagram_id: cleanInsta,
-        language_level: applyForm.language_level,
+        korean_level: applyForm.korean_level,
+        japanese_level: applyForm.japanese_level,
         is_first: applyForm.is_first,
+        participation_count: applyForm.is_first ? 1 : Number(applyForm.participation_count) || 2,
       },
     ])
 
@@ -248,13 +279,13 @@ export default function ClubMainDashboard() {
       return
     }
 
-    // 달력 선택 값을 깔끔한 일시 형식으로 변환
-    const formattedDate = formatDateTimeString(newEvent.event_date)
+    // timestamptz 형식 에러 방지를 위해 ISO 표준 문자열로 변환
+    const isoDate = new Date(newEvent.event_date).toISOString()
 
     const { error } = await supabase.from('events').insert([
       {
         title: newEvent.title,
-        event_date: formattedDate,
+        event_date: isoDate,
         location: newEvent.location,
         max_count: Number(newEvent.max_count),
         current_count: 0,
@@ -352,7 +383,7 @@ export default function ClubMainDashboard() {
                     <div>
                       <div className="flex justify-between items-start mb-2">
                         <span className="text-xs font-semibold px-2.5 py-0.5 bg-indigo-50 text-indigo-600 rounded-md border border-indigo-100">
-                          {ev.event_date}
+                          {formatDisplayDate(ev.event_date)}
                         </span>
                         <span
                           className={`text-xs px-2 py-0.5 rounded-full font-bold ${
@@ -398,17 +429,7 @@ export default function ClubMainDashboard() {
                         </button>
                       ) : (
                         <button
-                          onClick={() => {
-                            setApplyForm((prev) => ({
-                              ...prev,
-                              name: userProfile?.name || prev.name,
-                              gender: isMale(userProfile?.gender) ? '남' : '여',
-                              instagram_id: userProfile?.instagram_id
-                                ? userProfile.instagram_id.replace(/^@/, '').trim()
-                                : prev.instagram_id,
-                            }))
-                            setSelectedEvent(ev)
-                          }}
+                          onClick={() => openApplyModal(ev)}
                           className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-xl shadow-sm transition active:scale-[0.99]"
                         >
                           참가 신청하기
@@ -435,19 +456,21 @@ export default function ClubMainDashboard() {
 
               <div className="bg-indigo-50 p-3 rounded-xl border border-indigo-100 text-xs text-indigo-900">
                 <p className="font-bold">{selectedEvent.title}</p>
-                <p className="text-indigo-600 mt-0.5">일시: {selectedEvent.event_date} | 장소: {selectedEvent.location}</p>
+                <p className="text-indigo-600 mt-0.5">
+                  일시: {formatDisplayDate(selectedEvent.event_date)} | 장소: {selectedEvent.location}
+                </p>
               </div>
 
               <form onSubmit={handleApply} className="space-y-3 text-xs">
+                {/* 기본 정보 (계정 정보 고정 출력) */}
                 <div>
                   <label className="block font-semibold text-slate-700 mb-1">이름</label>
                   <input
                     type="text"
                     required
+                    readOnly
                     value={applyForm.name}
-                    onChange={(e) => setApplyForm({ ...applyForm, name: e.target.value })}
-                    className="w-full p-2 border rounded-lg"
-                    placeholder="실명 또는 닉네임"
+                    className="w-full p-2 border rounded-lg bg-slate-50 text-slate-600 cursor-not-allowed"
                   />
                 </div>
 
@@ -455,78 +478,117 @@ export default function ClubMainDashboard() {
                   <div>
                     <label className="block font-semibold text-slate-700 mb-1">나이</label>
                     <input
-                      type="number"
-                      required
-                      value={applyForm.age}
-                      onChange={(e) => setApplyForm({ ...applyForm, age: e.target.value })}
-                      className="w-full p-2 border rounded-lg"
-                      placeholder="예: 25"
+                      type="text"
+                      readOnly
+                      value={applyForm.age ? `${applyForm.age}세` : '-'}
+                      className="w-full p-2 border rounded-lg bg-slate-50 text-slate-600 cursor-not-allowed"
                     />
                   </div>
                   <div>
                     <label className="block font-semibold text-slate-700 mb-1">성별</label>
-                    <select
-                      value={applyForm.gender}
-                      onChange={(e) => setApplyForm({ ...applyForm, gender: e.target.value })}
-                      className="w-full p-2 border rounded-lg bg-white"
-                    >
-                      <option value="남">남 (男)</option>
-                      <option value="여">여 (女)</option>
-                    </select>
+                    <input
+                      type="text"
+                      readOnly
+                      value={applyForm.gender === '남' ? '남 (男)' : '여 (女)'}
+                      className="w-full p-2 border rounded-lg bg-slate-50 text-slate-600 cursor-not-allowed"
+                    />
                   </div>
                 </div>
 
                 <div className="grid grid-cols-2 gap-2">
                   <div>
                     <label className="block font-semibold text-slate-700 mb-1">국적</label>
-                    <select
+                    <input
+                      type="text"
+                      readOnly
                       value={applyForm.nationality}
-                      onChange={(e) => setApplyForm({ ...applyForm, nationality: e.target.value })}
-                      className="w-full p-2 border rounded-lg bg-white"
-                    >
-                      <option value="한국">한국 (韓国)</option>
-                      <option value="일본">일본 (日本)</option>
-                      <option value="기타">기타 (Others)</option>
-                    </select>
+                      className="w-full p-2 border rounded-lg bg-slate-50 text-slate-600 cursor-not-allowed"
+                    />
                   </div>
                   <div>
-                    <label className="block font-semibold text-slate-700 mb-1">어학 실력</label>
+                    <label className="block font-semibold text-slate-700 mb-1">인스타그램</label>
+                    <input
+                      type="text"
+                      readOnly
+                      value={applyForm.instagram_id ? `@${applyForm.instagram_id}` : '-'}
+                      className="w-full p-2 border rounded-lg bg-slate-50 text-slate-600 cursor-not-allowed"
+                    />
+                  </div>
+                </div>
+
+                {/* 한국어 / 일본어 어학 실력 선택 (수정 가능) */}
+                <div className="grid grid-cols-2 gap-2 pt-1 border-t border-slate-100">
+                  <div>
+                    <label className="block font-semibold text-slate-700 mb-1">
+                      한국어 실력 <span className="text-indigo-600">*</span>
+                    </label>
                     <select
-                      value={applyForm.language_level}
-                      onChange={(e) => setApplyForm({ ...applyForm, language_level: e.target.value })}
-                      className="w-full p-2 border rounded-lg bg-white"
+                      value={applyForm.korean_level}
+                      onChange={(e) => setApplyForm({ ...applyForm, korean_level: e.target.value })}
+                      className="w-full p-2 border rounded-lg bg-white font-medium text-slate-800 focus:border-indigo-500"
                     >
                       <option value="초급">초급 (간단한 인사)</option>
                       <option value="중급">중급 (일상 회화)</option>
                       <option value="고급">고급 (원활한 대화)</option>
-                      <option value="원어민">모국어 (원어민)</option>
+                      <option value="모국어">모국어 (한국인)</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block font-semibold text-slate-700 mb-1">
+                      일본어 실력 <span className="text-indigo-600">*</span>
+                    </label>
+                    <select
+                      value={applyForm.japanese_level}
+                      onChange={(e) => setApplyForm({ ...applyForm, japanese_level: e.target.value })}
+                      className="w-full p-2 border rounded-lg bg-white font-medium text-slate-800 focus:border-indigo-500"
+                    >
+                      <option value="초급">초급 (간단한 인사)</option>
+                      <option value="중급">중급 (일상 회화)</option>
+                      <option value="고급">고급 (원활한 대화)</option>
+                      <option value="모국어">모국어 (일본인)</option>
                     </select>
                   </div>
                 </div>
 
-                <div>
-                  <label className="block font-semibold text-slate-700 mb-1">인스타그램 아이디</label>
-                  <input
-                    type="text"
-                    required
-                    value={applyForm.instagram_id}
-                    onChange={(e) => setApplyForm({ ...applyForm, instagram_id: e.target.value })}
-                    className="w-full p-2 border rounded-lg"
-                    placeholder="인스타그램 ID (@ 제외)"
-                  />
-                </div>
+                {/* 첫 참가 여부 및 참가 횟수 입력 */}
+                <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 space-y-2 mt-2">
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      id="first-check"
+                      checked={applyForm.is_first}
+                      onChange={(e) =>
+                        setApplyForm({
+                          ...applyForm,
+                          is_first: e.target.checked,
+                          participation_count: e.target.checked ? 1 : applyForm.participation_count,
+                        })
+                      }
+                      className="rounded text-indigo-600 w-4 h-4"
+                    />
+                    <label htmlFor="first-check" className="font-semibold text-slate-800 select-none cursor-pointer">
+                      교류회 첫 참가입니다
+                    </label>
+                  </div>
 
-                <div className="flex items-center gap-2 pt-1">
-                  <input
-                    type="checkbox"
-                    id="first-check"
-                    checked={applyForm.is_first}
-                    onChange={(e) => setApplyForm({ ...applyForm, is_first: e.target.checked })}
-                    className="rounded text-indigo-600"
-                  />
-                  <label htmlFor="first-check" className="text-slate-600 select-none">
-                    교류회 첫 참가입니다
-                  </label>
+                  {!applyForm.is_first && (
+                    <div className="flex items-center gap-2 pt-1">
+                      <label className="text-slate-600 whitespace-nowrap">참가 경험 횟수:</label>
+                      <div className="flex items-center gap-1">
+                        <input
+                          type="number"
+                          min={2}
+                          required
+                          value={applyForm.participation_count}
+                          onChange={(e) =>
+                            setApplyForm({ ...applyForm, participation_count: Number(e.target.value) })
+                          }
+                          className="w-20 p-1.5 border rounded-lg bg-white text-center font-bold"
+                        />
+                        <span className="text-slate-500 font-medium">회차 참여</span>
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 <div className="flex gap-2 pt-3">
@@ -572,7 +634,6 @@ export default function ClubMainDashboard() {
                   </div>
                   <div>
                     <label className="block font-semibold text-slate-700 mb-1">일시 (달력/시간 선택)</label>
-                    {/* 달력 및 시간 선택 팝업 input */}
                     <input
                       type="datetime-local"
                       required
@@ -667,9 +728,9 @@ export default function ClubMainDashboard() {
                         <th className="p-3">나이</th>
                         <th className="p-3">성별</th>
                         <th className="p-3">국적</th>
-                        <th className="p-3">인스타그램 (클릭 시 이동)</th>
-                        <th className="p-3">어학 실력</th>
-                        <th className="p-3">첫 참가</th>
+                        <th className="p-3">인스타그램</th>
+                        <th className="p-3">어학 실력 (한국어 / 일본어)</th>
+                        <th className="p-3">참가 이력</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
@@ -716,14 +777,19 @@ export default function ClubMainDashboard() {
                                   <span className="text-slate-400">-</span>
                                 )}
                               </td>
-                              <td className="p-3 text-slate-600">{app.language_level}</td>
+                              <td className="p-3 text-slate-600">
+                                <span className="font-medium text-slate-700">KR:</span> {app.korean_level || '-'} /{' '}
+                                <span className="font-medium text-slate-700">JP:</span> {app.japanese_level || '-'}
+                              </td>
                               <td className="p-3">
                                 {app.is_first ? (
                                   <span className="px-2 py-0.5 bg-amber-50 text-amber-600 rounded text-[11px] font-semibold">
                                     첫참가
                                   </span>
                                 ) : (
-                                  <span className="text-slate-400">재참가</span>
+                                  <span className="px-2 py-0.5 bg-slate-100 text-slate-700 rounded text-[11px] font-medium">
+                                    {app.participation_count ? `${app.participation_count}회차` : '재참가'}
+                                  </span>
                                 )}
                               </td>
                             </tr>
@@ -742,16 +808,17 @@ export default function ClubMainDashboard() {
                     <thead>
                       <tr className="bg-slate-50 text-slate-600 border-b">
                         <th className="p-3">이름 / 닉네임</th>
-                        <th className="p-3">인스타그램 (클릭 시 이동)</th>
                         <th className="p-3">성별</th>
                         <th className="p-3">국적</th>
+                        <th className="p-3">인스타그램</th>
+                        <th className="p-3">어학 실력 (한국어 / 일본어)</th>
                         <th className="p-3">회원 등급</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
                       {allMembers.length === 0 ? (
                         <tr>
-                          <td colSpan={5} className="p-8 text-center text-slate-400">
+                          <td colSpan={6} className="p-8 text-center text-slate-400">
                             등록된 회원이 없습니다.
                           </td>
                         </tr>
@@ -762,6 +829,20 @@ export default function ClubMainDashboard() {
                           return (
                             <tr key={member.id} className="hover:bg-slate-50/80 transition">
                               <td className="p-3 font-semibold text-slate-900">{member.name || '미설정'}</td>
+                              <td className="p-3">
+                                {member.gender ? (
+                                  <span
+                                    className={`px-2 py-0.5 rounded font-semibold text-[11px] ${
+                                      isMale(member.gender) ? 'bg-blue-50 text-blue-600' : 'bg-rose-50 text-rose-600'
+                                    }`}
+                                  >
+                                    {isMale(member.gender) ? '남 男' : '여 女'}
+                                  </span>
+                                ) : (
+                                  <span className="text-slate-400">-</span>
+                                )}
+                              </td>
+                              <td className="p-3 text-slate-700">{member.nationality || '-'}</td>
                               <td className="p-3">
                                 {cleanInsta ? (
                                   <a
@@ -779,20 +860,10 @@ export default function ClubMainDashboard() {
                                   <span className="text-slate-400">-</span>
                                 )}
                               </td>
-                              <td className="p-3">
-                                {member.gender ? (
-                                  <span
-                                    className={`px-2 py-0.5 rounded font-semibold text-[11px] ${
-                                      isMale(member.gender) ? 'bg-blue-50 text-blue-600' : 'bg-rose-50 text-rose-600'
-                                    }`}
-                                  >
-                                    {isMale(member.gender) ? '남 男' : '여 女'}
-                                  </span>
-                                ) : (
-                                  <span className="text-slate-400">-</span>
-                                )}
+                              <td className="p-3 text-slate-600">
+                                <span className="font-medium text-slate-700">KR:</span> {member.korean_level || '-'} /{' '}
+                                <span className="font-medium text-slate-700">JP:</span> {member.japanese_level || '-'}
                               </td>
-                              <td className="p-3 text-slate-700">{member.nationality || '-'}</td>
                               <td className="p-3">
                                 {member.role === 'ADMIN' ? (
                                   <span className="px-2 py-0.5 bg-purple-100 text-purple-700 font-bold rounded text-[11px]">
