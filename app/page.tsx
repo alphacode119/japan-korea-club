@@ -62,6 +62,17 @@ export default function ClubMainDashboard() {
     return g === 'male' || g === '남' || g === '남자' || g === 'm'
   }
 
+  // 어학 등급(상/중/하 등)을 고급/중급/초급/원어민으로 매핑 변환
+  const normalizeLevel = (lvl?: string, defaultVal: string = '중급') => {
+    if (!lvl) return defaultVal
+    const clean = lvl.trim()
+    if (clean.includes('원어민') || clean.includes('모국어') || clean.includes('네이티브')) return '원어민'
+    if (clean.includes('상') || clean.includes('고급')) return '고급'
+    if (clean.includes('중') || clean.includes('중급')) return '중급'
+    if (clean.includes('하') || clean.includes('초급')) return '초급'
+    return defaultVal
+  }
+
   // 화면 표시용 날짜 변환 함수
   const formatDisplayDate = (rawDate: string) => {
     if (!rawDate) return ''
@@ -79,17 +90,17 @@ export default function ClubMainDashboard() {
     return `${year}-${month}-${day} (${dayOfWeek}) ${hours}:${minutes}`
   }
 
-  // 신청 폼 상태 (한국어/일본어 실력 및 참가횟수 분리)
+  // 신청 폼 상태
   const [applyForm, setApplyForm] = useState({
     name: '',
     age: '',
     gender: '남',
     nationality: '한국',
     instagram_id: '',
-    korean_level: '중급',
+    korean_level: '고급',
     japanese_level: '중급',
-    is_first: true,
-    participation_count: 2, // 재참가 기본값
+    participation_type: 'first' as 'first' | 'repeat', // 'first' 또는 'repeat' 둘 중 하나 선택
+    participation_count: 2,
   })
 
   // 신규 모임 생성 폼 (관리자용)
@@ -130,8 +141,8 @@ export default function ClubMainDashboard() {
           gender: isMale(profile.gender) ? '남' : '여',
           nationality: profile.nationality || '한국',
           instagram_id: profile.instagram_id ? profile.instagram_id.replace(/^@/, '').trim() : '',
-          korean_level: profile.korean_level || '중급',
-          japanese_level: profile.japanese_level || '중급',
+          korean_level: normalizeLevel(profile.korean_level, '고급'),
+          japanese_level: normalizeLevel(profile.japanese_level, '중급'),
         }))
       }
 
@@ -182,7 +193,7 @@ export default function ClubMainDashboard() {
     }
   }
 
-  // 참가 신청 모달 열기 핸들러 (회원 기본정보 동기화 & 실력 선택창 초기화)
+  // 참가 신청 모달 열기 핸들러
   const openApplyModal = (ev: EventItem) => {
     if (userProfile) {
       setApplyForm((prev) => ({
@@ -192,9 +203,9 @@ export default function ClubMainDashboard() {
         gender: isMale(userProfile.gender) ? '남' : '여',
         nationality: userProfile.nationality || '한국',
         instagram_id: userProfile.instagram_id ? userProfile.instagram_id.replace(/^@/, '').trim() : '',
-        korean_level: userProfile.korean_level || prev.korean_level || '중급',
-        japanese_level: userProfile.japanese_level || prev.japanese_level || '중급',
-        is_first: true,
+        korean_level: normalizeLevel(userProfile.korean_level, '고급'),
+        japanese_level: normalizeLevel(userProfile.japanese_level, '중급'),
+        participation_type: 'first',
         participation_count: 2,
       }))
     }
@@ -207,6 +218,7 @@ export default function ClubMainDashboard() {
     if (!selectedEvent || !currentUser) return
 
     const cleanInsta = applyForm.instagram_id.replace(/^@/, '').trim()
+    const isFirstTime = applyForm.participation_type === 'first'
 
     const { error } = await supabase.from('event_applications').insert([
       {
@@ -219,8 +231,8 @@ export default function ClubMainDashboard() {
         instagram_id: cleanInsta,
         korean_level: applyForm.korean_level,
         japanese_level: applyForm.japanese_level,
-        is_first: applyForm.is_first,
-        participation_count: applyForm.is_first ? 1 : Number(applyForm.participation_count) || 2,
+        is_first: isFirstTime,
+        participation_count: isFirstTime ? 1 : Number(applyForm.participation_count) || 2,
       },
     ])
 
@@ -279,7 +291,6 @@ export default function ClubMainDashboard() {
       return
     }
 
-    // timestamptz 형식 에러 방지를 위해 ISO 표준 문자열로 변환
     const isoDate = new Date(newEvent.event_date).toISOString()
 
     const { error } = await supabase.from('events').insert([
@@ -462,7 +473,7 @@ export default function ClubMainDashboard() {
               </div>
 
               <form onSubmit={handleApply} className="space-y-3 text-xs">
-                {/* 기본 정보 (계정 정보 고정 출력) */}
+                {/* 기본 정보 (고정 출력) */}
                 <div>
                   <label className="block font-semibold text-slate-700 mb-1">이름</label>
                   <input
@@ -516,7 +527,7 @@ export default function ClubMainDashboard() {
                   </div>
                 </div>
 
-                {/* 한국어 / 일본어 어학 실력 선택 (수정 가능) */}
+                {/* 어학 실력 선택 (고급, 중급, 초급, 원어민) */}
                 <div className="grid grid-cols-2 gap-2 pt-1 border-t border-slate-100">
                   <div>
                     <label className="block font-semibold text-slate-700 mb-1">
@@ -530,7 +541,7 @@ export default function ClubMainDashboard() {
                       <option value="초급">초급 (간단한 인사)</option>
                       <option value="중급">중급 (일상 회화)</option>
                       <option value="고급">고급 (원활한 대화)</option>
-                      <option value="모국어">모국어 (한국인)</option>
+                      <option value="원어민">원어민 (모국어)</option>
                     </select>
                   </div>
                   <div>
@@ -545,47 +556,83 @@ export default function ClubMainDashboard() {
                       <option value="초급">초급 (간단한 인사)</option>
                       <option value="중급">중급 (일상 회화)</option>
                       <option value="고급">고급 (원활한 대화)</option>
-                      <option value="모국어">모국어 (일본인)</option>
+                      <option value="원어민">원어민 (모국어)</option>
                     </select>
                   </div>
                 </div>
 
-                {/* 첫 참가 여부 및 참가 횟수 입력 */}
+                {/* 첫 참가 vs N회차 라디오 선택 영역 */}
                 <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 space-y-2 mt-2">
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="checkbox"
-                      id="first-check"
-                      checked={applyForm.is_first}
-                      onChange={(e) =>
-                        setApplyForm({
-                          ...applyForm,
-                          is_first: e.target.checked,
-                          participation_count: e.target.checked ? 1 : applyForm.participation_count,
-                        })
-                      }
-                      className="rounded text-indigo-600 w-4 h-4"
-                    />
-                    <label htmlFor="first-check" className="font-semibold text-slate-800 select-none cursor-pointer">
-                      교류회 첫 참가입니다
+                  <span className="block font-semibold text-slate-700 mb-1">참가 이력 구분</span>
+                  <div className="grid grid-cols-2 gap-3 items-center">
+                    {/* 옵션 1: 첫 참가 */}
+                    <label
+                      className={`flex items-center gap-2 p-2 rounded-lg border cursor-pointer transition ${
+                        applyForm.participation_type === 'first'
+                          ? 'bg-indigo-50/70 border-indigo-300 text-indigo-900 font-bold'
+                          : 'bg-white border-slate-200 text-slate-600'
+                      }`}
+                    >
+                      <input
+                        type="radio"
+                        name="participation_type"
+                        value="first"
+                        checked={applyForm.participation_type === 'first'}
+                        onChange={() => setApplyForm({ ...applyForm, participation_type: 'first' })}
+                        className="text-indigo-600"
+                      />
+                      <span>🌱 첫 참가</span>
+                    </label>
+
+                    {/* 옵션 2: N회차 (재참가) */}
+                    <label
+                      className={`flex items-center gap-2 p-2 rounded-lg border cursor-pointer transition ${
+                        applyForm.participation_type === 'repeat'
+                          ? 'bg-indigo-50/70 border-indigo-300 text-indigo-900 font-bold'
+                          : 'bg-white border-slate-200 text-slate-600'
+                      }`}
+                    >
+                      <input
+                        type="radio"
+                        name="participation_type"
+                        value="repeat"
+                        checked={applyForm.participation_type === 'repeat'}
+                        onChange={() => setApplyForm({ ...applyForm, participation_type: 'repeat' })}
+                        className="text-indigo-600"
+                      />
+                      <span>🔁 N회차 (재참가)</span>
                     </label>
                   </div>
 
-                  {!applyForm.is_first && (
-                    <div className="flex items-center gap-2 pt-1">
-                      <label className="text-slate-600 whitespace-nowrap">참가 경험 횟수:</label>
-                      <div className="flex items-center gap-1">
-                        <input
-                          type="number"
-                          min={2}
-                          required
+                  {/* N회차 선택 시 나타나는 회차 선택/입력칸 */}
+                  {applyForm.participation_type === 'repeat' && (
+                    <div className="pt-2 flex items-center justify-between bg-white p-2.5 rounded-lg border border-indigo-100">
+                      <span className="text-slate-700 font-medium">이번 참가 회차:</span>
+                      <div className="flex items-center gap-1.5">
+                        <select
                           value={applyForm.participation_count}
                           onChange={(e) =>
                             setApplyForm({ ...applyForm, participation_count: Number(e.target.value) })
                           }
-                          className="w-20 p-1.5 border rounded-lg bg-white text-center font-bold"
+                          className="p-1.5 border border-slate-300 rounded-lg bg-white text-slate-800 font-bold text-center"
+                        >
+                          {[2, 3, 4, 5, 6, 7, 8, 9, 10, 15, 20, 30].map((num) => (
+                            <option key={num} value={num}>
+                              {num}회차
+                            </option>
+                          ))}
+                        </select>
+                        <span className="text-slate-400 text-[11px]">(직접입력:</span>
+                        <input
+                          type="number"
+                          min={2}
+                          value={applyForm.participation_count}
+                          onChange={(e) =>
+                            setApplyForm({ ...applyForm, participation_count: Math.max(2, Number(e.target.value)) })
+                          }
+                          className="w-14 p-1 border rounded text-center font-bold"
                         />
-                        <span className="text-slate-500 font-medium">회차 참여</span>
+                        <span className="text-slate-400 text-[11px]">회)</span>
                       </div>
                     </div>
                   )}
@@ -778,8 +825,8 @@ export default function ClubMainDashboard() {
                                 )}
                               </td>
                               <td className="p-3 text-slate-600">
-                                <span className="font-medium text-slate-700">KR:</span> {app.korean_level || '-'} /{' '}
-                                <span className="font-medium text-slate-700">JP:</span> {app.japanese_level || '-'}
+                                <span className="font-medium text-slate-700">KR:</span> {normalizeLevel(app.korean_level, '-')} /{' '}
+                                <span className="font-medium text-slate-700">JP:</span> {normalizeLevel(app.japanese_level, '-')}
                               </td>
                               <td className="p-3">
                                 {app.is_first ? (
@@ -861,8 +908,8 @@ export default function ClubMainDashboard() {
                                 )}
                               </td>
                               <td className="p-3 text-slate-600">
-                                <span className="font-medium text-slate-700">KR:</span> {member.korean_level || '-'} /{' '}
-                                <span className="font-medium text-slate-700">JP:</span> {member.japanese_level || '-'}
+                                <span className="font-medium text-slate-700">KR:</span> {normalizeLevel(member.korean_level, '-')} /{' '}
+                                <span className="font-medium text-slate-700">JP:</span> {normalizeLevel(member.japanese_level, '-')}
                               </td>
                               <td className="p-3">
                                 {member.role === 'ADMIN' ? (
